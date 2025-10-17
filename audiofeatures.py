@@ -49,6 +49,7 @@ def safe_request(
                 return None
 
 
+
 def chunked(iterable, size):
     lst = list(iterable)
     for i in range(0, len(lst), size):
@@ -58,13 +59,8 @@ def get_track_mp3(track_ids):
     tracks = sp.tracks(track_ids)
     if not tracks:
         print('no track')
-    for track in tracks:
-        if not track.get('preview_url'):
-            print(f'No preview_url for {track['name']}')
-            continue
-        print(track['preview_url'])
-
-get_track_mp3(my_track_ids)
+    ids = [track['id'] for track in tracks['tracks'] if track['id']]
+    return ids
 
 
 def get_reccobeats_id(spotify_ids):
@@ -74,14 +70,12 @@ def get_reccobeats_id(spotify_ids):
     method = 'GET'
     tracks = safe_request(method, url, headers=headers)
 
-    reccobeats_ids = []
-    for track in tracks['content']:
-        if not track.get('id'):
-            continue
-        reccobeats_id = track['id']
-        reccobeats_ids.append(reccobeats_id)
-    return reccobeats_ids
+    if not tracks or 'content' not in tracks or not tracks['content']:
+        print('no corresponding reccobeat_id')
+        return[]
 
+    reccobeats_ids = [track['id'] for track in tracks['content'] if track['id']]
+    return reccobeats_ids
 
 
 def get_track_features(reccobeats_ids):
@@ -89,8 +83,12 @@ def get_track_features(reccobeats_ids):
     headers = {'Accept': 'application/json'}
     batch_features = safe_request("GET", url, headers=headers)
 
+    if not batch_features or 'content' not in batch_features or not batch_features['content']:
+        print('no features')
+        return []
+
     batch_track_features = []
-    for features in batch_features:
+    for features in batch_features['content']:
         try:
             batch_track_features.append({
                 "track_id": features['href'][31:],
@@ -115,34 +113,30 @@ def get_track_features(reccobeats_ids):
 
 
 def save_track_features(my_track_ids):
-    with engine.connect() as conn:
-        track_feature_ids = set(conn.execute(select(track_features.c.reccobeats_id)).scalars().all())
-
     new_track_features = []
     for spotify_ids in chunked(my_track_ids, 40):
+        print(f'going through spotify ids: {spotify_ids}')
         try:
             reccobeats_ids = get_reccobeats_id(spotify_ids)
-        except Exception as e:
-            print(f'Error:{e}')
-            continue
-        print(f'\ngoing through chunk: {reccobeats_ids}\n')
-
-        for reccobeats_id in reccobeats_ids:
-            if reccobeats_id in track_feature_ids:
-                print('skipped duplicate')
+            if not reccobeats_ids:
                 continue
+        except Exception as e:
+            print(f'Error!?:{e}')
+            continue
+        print(f'\ngoing through reccobeats ids: {reccobeats_ids}\n')
+
         try:
             features = get_track_features(reccobeats_ids)
             print('got features successfully')
-            new_track_features.append(features)
+            new_track_features.extend(features)
         except Exception as e:
-            print(f'Error:{e}')
+            print(f'Error?:{e}')
             continue
 
         time.sleep(0.10)
 
     if new_track_features:
-        print('going to try to insert new values...')
+        print(f'going to try to insert new values...\n{new_track_features}')
         try:
             with engine.begin() as conn:
                 conn.execute(insert(track_features), new_track_features)

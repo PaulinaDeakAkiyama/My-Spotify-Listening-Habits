@@ -49,7 +49,7 @@ def update_playlists():
     return my_playlists
 
 
-def update_tracks(playlist_id, offset):
+def update_tracks_in_playlist(playlist_id, offset):
     playlist_info = sp.playlist_items(playlist_id=playlist_id, limit=100, offset=offset)
     items = playlist_info.get('items', [])
 
@@ -124,7 +124,7 @@ for playlist_id in my_playlists:
     safety_limit = 1000
     while track_count<track_total and safety_limit > 0:
         print(f"Updating playlist {playlist_id} from offset {offset}")
-        update_tracks(playlist_id,offset)
+        update_tracks_in_playlist(playlist_id,offset)
         offset += 100
         with engine.connect() as conn:
             track_count = conn.execute(
