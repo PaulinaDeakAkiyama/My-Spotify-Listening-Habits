@@ -56,7 +56,7 @@ def chunked(iterable, size):
         yield lst[i:i + size]
 
 def get_track_mp3(track_ids):
-    tracks = sp.tracks(track_ids)
+    tracks = sp.tracks(my_track_ids)
     if not tracks:
         print('no track')
     ids = [track['id'] for track in tracks['tracks'] if track['id']]
