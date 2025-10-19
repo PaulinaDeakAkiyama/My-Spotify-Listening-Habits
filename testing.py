@@ -1,75 +1,101 @@
+import concurrent.futures
 from oauth import get_spotify_auth
-from db import engine, listening_stream, playlists, my_tracks, track_features #track_features, artists, fact
+from db import engine, my_tracks, track_features
 from sqlalchemy import insert, select, func
 from datetime import datetime, time, timezone, timedelta
-import time
+import time, os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from tracker import save_last_50_tracks
 
 import requests
 
 sp = get_spotify_auth()
+os.makedirs("previews", exist_ok=True)
 
 def chunked(iterable, size):
     lst = list(iterable)
     for i in range(0, len(lst), size):
         yield lst[i:i + size]
 
-with engine.connect() as conn:
-    my_track_ids = set(
-        conn.execute(
-            select(my_tracks.c.track_id)
+def chunked_d(d, size):
+    items = list(d.items())
+    for i in range(0, len(items), size):
+        yield dict(items[i:i + size])
+
+def get_missing_names_artists():
+    with engine.connect() as conn:
+        result = conn.execute(
+            select(my_tracks.c.track_name, my_tracks.c.artist_name)
             .where(my_tracks.c.track_id.notin_(
                 select(track_features.c.track_id))
             )
-        ).scalars().all()
-    )
+        ).all()
+        track_names_and_artists = {a: b for a, b in result}
+    print(f'Found {len(track_names_and_artists)} missing tracks')
+    return(track_names_and_artists)
 
-def get_track_mp3(track_ids):
+
+def get_preview_url():
+    tracks_artists = get_missing_names_artists()
+
+    for chunk in chunked_d(tracks_artists, 10):
+        preview_urls = []
+        for key in chunk.keys():
+            value = chunk[key]
+            url = f'https://api.deezer.com/search?q=artist:"{value}" track:"{key}"'
+
+            try:
+                response = requests.get(url, timeout=10).json()
+                if response:
+                    if response.get('data') and response['data'][0].get('preview'):
+                        preview_url = response['data'][0]['preview']
+                        preview_urls.append(preview_url)
+                        print(f'got preview url for {key}: {preview_url}')
+                    else:
+                        print(f'no data for {key}:{value}')
+                else:
+                    print(f'no response for {key}:{value}')
+            except Exception as e:
+                print(f'oops {e}')
+            time.sleep(0.5)
+        yield preview_urls
+
+
+def download_preview(url):
     try:
-        tracks = sp.tracks(track_ids)
-        if not tracks:
-            print('no track')
-        track_names = [track['name'] for track in tracks['tracks'] if track['name']]
-        track_artists = [track['artists'][0]['name'] for track in tracks['tracks'] if track['artists']]
-        # print(f'{track_names}\n number of track names: {len(track_names)}')
-        # print(f'{track_artists}\n number of artist names: {len(track_artists)}')
-        track_artist_dic = dict(zip(track_names, track_artists))
+        with requests.Session() as session:
+            response = session.get(url, timeout=20)
+            if response.status_code == 200:
+                filename = os.path.join('previews', url.split('/')[-1][:36])
+                if os.path.exists(filename):
+                    print(f"⏭ Already exists: {filename}")
+                    return
 
-        return(track_artist_dic)
-
-    except Exception as e:
-        print(f'Error! {e}')
-
-track_artist = {}
-for chunk in chunked(my_track_ids, 50):
-    track_artist_dic = get_track_mp3(chunk)
-    track_artist.update(track_artist_dic)
-    time.sleep(1)
-print(track_artist)
-
-preview_urls = []
-for key in track_artist.keys():
-    value = track_artist[key]
-    url = f'https://api.deezer.com/search?q=artist:"{value}" track:"{key}"'
-    method = 'GET'
-
-    try:
-        response = requests.request(method, url).json()
-        if response:
-            if response.get('data') and response['data'][0].get('preview'):
-                preview_url = response['data'][0]['preview']
-                preview_urls.append(preview_url)
-                print(preview_url)
-
+                with open(filename, 'wb') as f:
+                    f.write(response.content)
+                print(f'downloaded successfully{url}\n file path = {filename}')
             else:
-                print(f'no data for {key}:{value}')
-        else:
-            print(f'no response for {key}:{value}')
+                print(f'failed! response code: {response.status_code},{response.text},{url}')
     except Exception as e:
-        print(f'oops {e}')
-    time.sleep(0.50)
+        print(f'error! {e}')
 
-"https://cdnt-preview.dzcdn.net/api/1/1/0/8/2/0/08232759fb80c6a3e2b93e74400ae666.mp3?hdnea=exp=1760786848~acl=/api/1/1/0/8/2/0/08232759fb80c6a3e2b93e74400ae666.mp3*~data=user_id=0,application_id=42~hmac=4154f66b9c987be89f5d651365951af5afb44797144e9291e2455294b523e3ba"
-"https://cdnt-preview.dzcdn.net/api/1/1/6/7/0/0/6708f065789fd7e151e7ac952940d5a5.mp3?hdnea=exp=1760786849~acl=/api/1/1/6/7/0/0/6708f065789fd7e151e7ac952940d5a5.mp3*~data=user_id=0,application_id=42~hmac=739aef2cde20f5f00ad59b2fd2dcfcafe7f96c1d2949f3d9c4228296f88844b6"
-"https://cdnt-preview.dzcdn.net/api/1/1/1/6/4/0/164469066a4e9dc23b0e4a9c43f62475.mp3?hdnea=exp=1760786850~acl=/api/1/1/1/6/4/0/164469066a4e9dc23b0e4a9c43f62475.mp3*~data=user_id=0,application_id=42~hmac=53355b3f50263636d3d168512af48b0a76ef417308be6882349c723ff54d15e7"
+
+
+def download_simultaneously(urls, max_workers=10):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(download_preview, url) for url in urls]
+        concurrent.futures.wait(futures)
+
+
+def get_audio_files():
+    for urls in get_preview_url():
+        download_simultaneously(urls)
+
+get_audio_files()
+# url = 'https://cdnt-preview.dzcdn.net/api/1/1/0/e/b/0/0eb9a0f6ef2b30b639b2865f7a918e90.mp3?hdnea=exp=1760890054~acl=/api/1/1/0/e/b/0/0eb9a0f6ef2b30b639b2865f7a918e90.mp3*~data=user_id=0,application_id=42~hmac=912ecb9c6078b1f844180c39b034758c7e447d4f51f69577b3d72f691ff61dc6'
+# print(f'{os.path.join('previews', url.split('/')[-1][:36])}')
+
+
+
+
