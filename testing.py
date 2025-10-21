@@ -69,7 +69,7 @@ def download_preview(track_id, track, url):
         with requests.Session() as session:
             response = session.get(url, timeout=20)
             if response.status_code == 200:
-                filename = os.path.join('previews', f'{safe_name}_{id}')
+                filename = os.path.join('previews', f'{safe_name}_{track_id}')
                 if os.path.exists(filename):
                     print(f"Already exists: {filename}")
                     return
@@ -96,64 +96,87 @@ def get_audio_files():
     for preview_items in get_preview_url():
         download_simultaneously(preview_items)
 
-# url = 'https://cdnt-preview.dzcdn.net/api/1/1/0/e/b/0/0eb9a0f6ef2b30b639b2865f7a918e90.mp3?hdnea=exp=1760890054~acl=/api/1/1/0/e/b/0/0eb9a0f6ef2b30b639b2865f7a918e90.mp3*~data=user_id=0,application_id=42~hmac=912ecb9c6078b1f844180c39b034758c7e447d4f51f69577b3d72f691ff61dc6'
-# print(f'{os.path.join('previews', url.split('/')[-1][:36])}')
-
-
-
-
-import imageio_ffmpeg as ffmpeg
-
-def get_features_from_wav():
+def get_wav_from_previews():
     preview_folder = 'previews'
     file_paths = [os.path.join(preview_folder, f) for f in os.listdir(preview_folder)]
-    wav_file = os.path.join(preview_folder, 'trimmed.wav')
-    features = []
+    print(f'{file_paths}')
+    wav_files = []
+
     for path in file_paths:
+        # First conversion
+        wav_file = os.path.join(preview_folder, os.path.splitext(os.path.basename(path))[0] + '.wav')
         subprocess.run([
-            'ffmpeg', "-y", "-i", path,
-            "-t", "28",  # trim to 30 seconds
-            "-ar", "44100",  # sample rate 44.1kHz
-            "-ac", "2",  # stereo
-            "-c:a", "pcm_s16le",  # 16-bit PCM
+            'ffmpeg', '-y', '-i', path,
+            '-t', '28',
+            '-ar', '44100',
+            '-ac', '2',
+            '-c:a', 'pcm_s16le',
             wav_file
-        ])
+        ], check=True)
+
         size = os.stat(wav_file).st_size
         print(f"Converted WAV size: {size} bytes ({size / 1_000_000:.2f} MB)")
-        if not size < 5000000:
+
+        # Re-convert if >5MB
+        if size >= 5_000_000:
             subprocess.run([
-                'ffmpeg', "-y", "-i", path,
-                "-t", "27",  # trim to 30 seconds
-                "-ar", "44100",  # sample rate 44.1kHz
-                "-ac", "2",  # stereo
-                "-c:a", "pcm_s16le",  # 16-bit PCM
+                'ffmpeg', '-y', '-i', path,
+                '-t', '27',
+                '-ar', '44100',
+                '-ac', '2',
+                '-c:a', 'pcm_s16le',
                 wav_file
-            ])
-            print(f"Size wasn't under 5mb, converted again\nConverted WAV size: {size} bytes ({size / 1_000_000:.2f} MB)")
+            ], check=True)
+            new_size = os.stat(wav_file).st_size
+            print(f"Re-converted (was too large). New size: {new_size / 1_000_000:.2f} MB")
+        wav_files.append(wav_file)
+    return wav_files
 
-        url = "https://api.reccobeats.com/v1/analysis/audio-features"
-        with open(wav_file, "rb") as f:
-            files = {"audioFile": ("trimmed.wav", f, "audio/wav")}
-            try:
-                response = requests.post(url, files=files)
-                if response.status_code == 200:
-                    print("Success:", response.json())
-                    dict_response = dict(response.json())
-                    dict_response['track_id'] = 'id'
-                    dict_response['key'] = ''
-                    dict_response['mode_'] = ''
-                    features.append(dict_response)
-                else:
-                    print(f"Error {response.status_code}: {response.text}")
-            except Exception as e:
-                print("Request failed:", e)
+def upload_wav_get_features(wav_file):
+    url = "https://api.reccobeats.com/v1/analysis/audio-features"
+    with open(wav_file, 'rb') as f:
+        files = {'audioFile': ('trimmed.wav', f, 'audio/wav')}
+        try:
+            response = requests.post(url, files=files)
+            if response.status_code == 200:
+                data = response.json()
+                file_name = os.path.basename(wav_file)
+                name_part = os.path.splitext(wav_file)[0]
+                track_id = name_part.split('_')[-1]
+                data['track_id'] = track_id
+                data['reccobeats_id'] = ''
+                data['key'] = ''
+                data['mode_'] = ''
+                print("Uploaded successfully")
+                return data
+            else:
+                print(f"Error {response.status_code}: {response.text}")
+                return None
+        except Exception as e:
+            print("Request failed:", e)
+    return None
 
-
-def upload_simultaneously(urls, max_workers=10):
+def upload_simultaneously(wav_files, max_workers=10):
+    features = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(get_features_from_wav(), url) for url in urls]
-        concurrent.futures.wait(futures)
+        futures = [executor.submit(upload_wav_get_features, wf) for wf in wav_files]
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result:
+                features.append(result)
+    return features
 
+
+wav_files = get_wav_from_previews()
+print(wav_files)
+# features = upload_simultaneously(wav_files)
+# print(f'going to try to insert new values...\n{features}')
+#         try:
+#             with engine.begin() as conn:
+#                 conn.execute(insert(track_features), features)
+#             print('nice.')
+#         except Exception as e:
+#             print(f'couldnt insert into table {e}')
 
 # preview_folder = 'previews'
 # file_paths = [os.path.join(preview_folder, f) for f in os.listdir(preview_folder)]
