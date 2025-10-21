@@ -91,7 +91,6 @@ def download_simultaneously(preview_items, max_workers=10):
         ]
         concurrent.futures.wait(futures)
 
-
 def get_audio_files():
     for preview_items in get_preview_url():
         download_simultaneously(preview_items)
@@ -106,7 +105,7 @@ def get_wav_from_previews():
         # First conversion
         wav_file = os.path.join(preview_folder, os.path.splitext(os.path.basename(path))[0] + '.wav')
         subprocess.run([
-            'ffmpeg', '-y', '-i', path,
+            'ffmpeg', '-hide_banner','-y', '-i', path,
             '-t', '28',
             '-ar', '44100',
             '-ac', '2',
@@ -144,10 +143,8 @@ def upload_wav_get_features(wav_file):
                 name_part = os.path.splitext(wav_file)[0]
                 track_id = name_part.split('_')[-1]
                 data['track_id'] = track_id
-                data['reccobeats_id'] = ''
-                data['key'] = ''
-                data['mode_'] = ''
                 print("Uploaded successfully")
+                time.sleep(0.5)
                 return data
             else:
                 print(f"Error {response.status_code}: {response.text}")
@@ -156,58 +153,58 @@ def upload_wav_get_features(wav_file):
             print("Request failed:", e)
     return None
 
-def upload_simultaneously(wav_files, max_workers=10):
+def feature_simultaneously(files, max_workers=10):
     features = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(upload_wav_get_features, wf) for wf in wav_files]
+        futures = [executor.submit(upload_wav_get_features, file)for file in files]
+        concurrent.futures.wait(futures)
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
             if result:
                 features.append(result)
-    return features
+        return features
 
 
-wav_files = get_wav_from_previews()
-print(wav_files)
-# features = upload_simultaneously(wav_files)
-# print(f'going to try to insert new values...\n{features}')
-#         try:
-#             with engine.begin() as conn:
-#                 conn.execute(insert(track_features), features)
-#             print('nice.')
-#         except Exception as e:
-#             print(f'couldnt insert into table {e}')
+def insert_features_from_wav_file(file_path):
+file_paths = os.listdir('previews')
+wav_files = [
+    os.path.join('previews', f)
+    for f in file_paths
+    if f.lower().endswith('.wav')
+]
+while len(wav_files) > 1:
+    for wav_files_ten in chunked(wav_files, 10):
+        try:
+            tracks = len(wav_files)
+            print(f'\nThere are {tracks} left. {datetime.now()}')
+            features = []
+            for attempt in range(5):
+                try:
+                    print(f'\ngoing to attempt uploading tracks {wav_files_ten}\n')
+                    ten_feature = feature_simultaneously(wav_files_ten)
+                    features.extend(ten_feature)
+                    break
+                except Exception as e:
+                    print(f'{e}\n going to retry in 10 seconds')
+                    time.sleep(10)
+                    if attempt == 4:
+                        print('max retried reached, skipping')
+                        break
+                time.sleep(5)
 
-# preview_folder = 'previews'
-# file_paths = [os.path.join(preview_folder, f) for f in os.listdir(preview_folder)]
-# ffmpeg_path = ffmpeg.get_ffmpeg_exe()
-# mp3_file = os.path.join(preview_folder, '00616718063a5211433291bc885282ee.mp3')
-# wav_file = os.path.join(preview_folder, 'trimmed.wav')
-#
-#
-# subprocess.run([
-#     ffmpeg_path, "-y", "-i", mp3_file,
-#     "-t", "28",          # trim to 30 seconds
-#     "-ar", "44100",      # sample rate 44.1kHz
-#     "-ac", "2",          # stereo
-#     "-c:a", "pcm_s16le", # 16-bit PCM
-#     wav_file
-# ])
-#
-
-# size = os.stat(wav_file).st_size
-# print(f"Converted WAV size: {size} bytes ({size/1_000_000:.2f} MB)")
-#
-# url = "https://api.reccobeats.com/v1/analysis/audio-features"
-# files = {"audioFile": ("trimmed.wav", open(wav_file, "rb"), "audio/wav")}
-#
-# try:
-#     response = requests.post(url, files=files)
-#     if response.status_code == 200:
-#         print("Success:", response.json())
-#         print(dict(response.json()))
-#     else:
-#         print(f"Error {response.status_code}: {response.text}")
-# except Exception as e:
-#     print("Request failed:", e)
-#
+            if features:
+                print(f'\ngoing to try to insert 10 new values...\n{features}\n')
+                try:
+                    with engine.begin() as conn:
+                        conn.execute(insert(track_features), features)
+                    print('nice.')
+                    for wav_file in wav_files_ten:
+                        os.remove(wav_file)
+                        print(f"{wav_file} has been removed successfully")
+                except Exception as e:
+                    print(f'couldnt insert into table {e}')
+        except KeyboardInterrupt:
+            print('Stopped!')
+    if len(wav_files) == 0:
+        print('no more wav files!')
+        break
