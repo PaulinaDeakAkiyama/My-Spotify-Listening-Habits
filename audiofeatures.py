@@ -1,13 +1,13 @@
 import time, os, subprocess, re, requests, concurrent.futures
 from db import engine, my_tracks, track_features
 from sqlalchemy import insert, select, func, text
-from oauth import get_spotify_auth
+from oauth import create_spotify_client
 from datetime import datetime, time as dtime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
 thread_local = threading.local()
-sp = get_spotify_auth()
+sp = create_spotify_client()
 os.makedirs("previews", exist_ok=True)
 
 #--------------------------------------------------------HELPERS---------------------------------------------------------
@@ -59,17 +59,19 @@ def safe_request(method: str,url: str,headers=None,params=None,data=None,max_ret
 #-----------------------------------STAGE ONE, get missing audio features-------------------------------
 
 def get_missing_tracks():
-    """will pull track_id:[track_name, track_artist] from SQL for all tracks with no features"""
+    """Return track_id:[track_name, track_artist] for all tracks with no features"""
     with engine.connect() as conn:
         result = conn.execute(
             select(my_tracks.c.track_id, my_tracks.c.track_name, my_tracks.c.artist_name)
-            .where(my_tracks.c.track_id.notin_(
-                select(track_features.c.track_id))
+            .where(
+                my_tracks.c.track_id.not_in(
+                    select(func.coalesce(track_features.c.track_id, 0))
+                )
             )
         ).all()
         id_track_artist = {a: [b, c] for a, b, c in result}
     print(f'Found {len(id_track_artist)}')
-    return (id_track_artist)
+    return id_track_artist
 
 #----------------------------------------STAGE TWO find features with reccobeats-----------------------------------------------
 

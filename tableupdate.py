@@ -1,10 +1,10 @@
-from oauth import get_spotify_auth
+from oauth import create_spotify_client
 from db import engine, playlists, my_tracks, listening_stream, listening_two  # track_features, artists, fact
 from sqlalchemy import insert, select, func
 from datetime import datetime, time
 import time
 
-sp = get_spotify_auth()
+sp = create_spotify_client()
 
 def update_playlists():
     user_playlists = sp.current_user_playlists()
@@ -138,8 +138,10 @@ def get_stream_tracks():
     with engine.connect() as conn:
         result = conn.execute(
             select(listening_two.c.track_id)
-            .where(listening_two.c.track_id.notin_(
-                select(my_tracks.c.track_id.coalesce()))
+            .where(
+                listening_two.c.track_id.not_in(
+                    select(func.coalesce(my_tracks.c.track_id, 0))
+                )
             )
         ).all()
     return result

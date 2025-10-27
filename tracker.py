@@ -1,9 +1,9 @@
-from oauth import get_spotify_auth
+from oauth import create_spotify_client
 from datetime import datetime, timezone, UTC
 from sqlalchemy import insert, select, func
 from db import engine, listening_history, listening_two
 
-sp = get_spotify_auth()
+sp = create_spotify_client()
 
 def get_current_track():
 
