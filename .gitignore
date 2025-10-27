@@ -25,7 +25,6 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-.env
 .idea/
 
 # PyInstaller
@@ -145,6 +144,11 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Database stuff
+*.ibd
+*.sqlitedb
+*.db
 
 # Spyder project settings
 .spyderproject
