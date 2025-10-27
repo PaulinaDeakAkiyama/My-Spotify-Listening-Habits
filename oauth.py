@@ -14,3 +14,7 @@ def create_spotify_client():
     ))
 
 sp = create_spotify_client()
+
+if __name__ == '__main__':
+    token_info = sp.auth_manager.get_access_token(as_dict=True)
+    print(token_info)
