@@ -1,3 +1,6 @@
+# Default ignored files
+/shelf/
+/workspace.xml
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -25,15 +28,6 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
-# pycharm
-
-.idea/*
-!.idea/codeStyles/
-!.idea/inspectionProfiles/
-!.idea/modules.xml
-!.idea/misc.xml
-!.idea/vcs.xml
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -148,15 +142,10 @@ celerybeat.pid
 .envrc
 .venv
 env/
-venv/
+
 ENV/
 env.bak/
 venv.bak/
-
-# Database stuff
-*.ibd
-*.sqlitedb
-*.db
 
 # Spyder project settings
 .spyderproject
@@ -196,9 +185,9 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
+#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore
 #  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#  and can be added to the global gitignore or merged into this file. However, if you prefer, 
+#  and can be added to the global gitignore or merged into this file. However, if you prefer,
 #  you could uncomment the following to ignore the entire vscode folder
 # .vscode/
 
@@ -219,4 +208,3 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-
