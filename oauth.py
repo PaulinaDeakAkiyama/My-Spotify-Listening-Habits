@@ -7,8 +7,8 @@ scope = "user-library-read user-read-recently-played user-read-currently-playing
 
 def create_spotify_client():
     return spotipy.Spotify(auth_manager=SpotifyOAuth(
-        client_id=Config.CLIENT_ID,
-        client_secret=Config.CLIENT_SECRET,
+        client_id=Config.SPOTIFY_CLIENT_ID,
+        client_secret=Config.SPOTIFY_CLIENT_SECRET,
         redirect_uri=Config.REDIRECT_URI,
         scope=scope
     ))

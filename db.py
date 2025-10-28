@@ -1,10 +1,11 @@
 from importlib.metadata import metadata
 from sqlalchemy import create_engine, MetaData, Table, text
+from config.settings import Config
 
 
-USER = "Akiyama-D"
-PASSWORD = "MySQLGuwaaa123"
-HOST = "localhost"
+USER = Config.SQL_USER
+PASSWORD = Config.SQL_PASSWORD
+HOST = Config.SQL_HOST
 DATABASE = "MySpotify"
 
 

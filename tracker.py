@@ -37,16 +37,15 @@ def get_current_track():
         })
     else:
         print(f'{datetime.now()}: no tracks are playing')
-        return
+        return {}
     return current_track_info
-
 
 
 def save_track(track_info):
     try:
-        with engine.connect() as conn:
-            conn.execute(insert(listening_two).values(track_info))
-            print(f'saved track!! {track_info['track_name']}')
+        with engine.begin() as conn:
+            conn.execute(insert(listening_two), track_info)
+            print(f'saved track!! {track_info} {datetime.now()}')
     except Exception as e:
         print(f'Something went wrong with inserting track: {track_info}\n Error: {e}')
 
