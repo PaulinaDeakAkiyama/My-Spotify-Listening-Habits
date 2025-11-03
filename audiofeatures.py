@@ -1,60 +1,14 @@
 import time, os, subprocess, re, requests, concurrent.futures
-from db import engine, my_tracks, track_features
+from db import engine, playlist_tracks, track_features, track_reference
 from sqlalchemy import insert, select, func, text
 from oauth import create_spotify_client
 from datetime import datetime, time as dtime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
+from utils import chunked, chunked_d, safe_request, sanitize_filename, log_to_sql, get_session, safe_spotipy_call
 
-thread_local = threading.local()
 sp = create_spotify_client()
 os.makedirs("previews", exist_ok=True)
 
-#--------------------------------------------------------HELPERS---------------------------------------------------------
-
-def log_to_sql(stage, status, message):
-    with engine.begin() as conn:
-        conn.execute(
-            text("INSERT INTO logging (stage, status, message) VALUES (:s, :st, :m)"),
-            {"s": stage, "st": status, "m": str(message)[:5000]}
-        )
-def chunked(iterable, size):
-    lst = list(iterable)
-    for i in range(0, len(lst), size):
-        yield lst[i:i + size]
-
-def chunked_d(d, size):
-    items = list(d.items())
-    for i in range(0, len(items), size):
-        yield dict(items[i:i + size])
-
-def sanitize_filename(name):
-    """Removes characters not allowed in filenames."""
-    return re.sub(r'[\\/*?:"<>|]', '_', name)
-
-
-def get_session():
-    if not hasattr(thread_local, "session"):
-        thread_local.session = requests.Session()
-    return thread_local.session
-
-def safe_request(method: str,url: str,headers=None,params=None,data=None,max_retries: int = 3,delay: float = 3.0):
-    session = get_session()
-    for attempt in range(max_retries):
-        try:
-            response = session.request(
-                method, url,
-                headers=headers,
-                params=params,
-                data=data
-            )
-            if response.status_code == 200:
-                return response.json()
-        except requests.RequestException as e:
-            log_to_sql("safe_request", "fail", f"{url} failed: {type(e).__name__} {str(e)}")
-            time.sleep(3)
-            continue
-    return None
 
 #-----------------------------------STAGE ONE, get missing audio features-------------------------------
 
@@ -62,9 +16,9 @@ def get_missing_tracks():
     """Return track_id:[track_name, track_artist] for all tracks with no features"""
     with engine.connect() as conn:
         result = conn.execute(
-            select(my_tracks.c.track_id, my_tracks.c.track_name, my_tracks.c.artist_name)
+            select(track_reference.c.track_id, track_reference.c.track_name, track_reference.c.artist_name)
             .where(
-                my_tracks.c.track_id.not_in(
+                track_reference.c.track_id.not_in(
                     select(func.coalesce(track_features.c.track_id, 0))
                 )
             )
@@ -120,6 +74,8 @@ def get_track_features(reccobeats_ids):
 
 
 def save_track_features(id_track_artist):
+    if not id_track_artist:
+        return
     my_track_ids = [id for id in id_track_artist.keys()]
     new_track_features = []
     no_reccobeats_ids = []
@@ -235,13 +191,11 @@ def get_wavs_from_all_mp3():
     file_paths = [os.path.join(preview_folder, f) for f in os.listdir(preview_folder)]
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         wav_files = list(executor.map(convert_to_wav, file_paths))
-        log_to_sql("convert_to_wav", "success", "Converted 10 files")
         return wav_files
 
 def convert_all_mp3_to_wav():
     try:
         wavs = get_wavs_from_all_mp3()
-        log_to_sql("convert_to_wav", "success", f"{len(wavs)} wavs created")
     except Exception as e:
         log_to_sql("convert_to_wav", "fail", str(e))
 
@@ -331,7 +285,7 @@ def insert_features_from_all_wavs():
 
 #----------------------------------------------------PIPELINE-----------------------------------------------------------------
 
-def run_pipeline():
+def run_audio_features_pipeline():
     stages = [
         ("get_missing_tracks", get_missing_tracks),
         ("save_track_features", save_track_features_wrapper),
@@ -358,7 +312,7 @@ def run_pipeline():
 
 if __name__ == "__main__":
     log_to_sql("pipeline", "start", "Audio feature pipeline initiated")
-    run_pipeline()
+    run_audio_features_pipeline()
     log_to_sql("pipeline", "end", "Pipeline completed")
 
 
