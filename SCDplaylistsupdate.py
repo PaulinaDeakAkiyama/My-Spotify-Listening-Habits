@@ -125,25 +125,22 @@ def insert_new_tracks(new_tracks):
     except Exception as e:
         print(f"Error inserting tracks: {e}")
 
-def get_existing_track_ids(playlist):
-
-
 
 def update_tracks_and_playlists():
     my_playlists = update_playlists()
 
+    all_playlist_contents = []
     for playlist_id in my_playlists:
         print(f'going through playlist:{playlist_id}...')
-
-        #existing_tracks = set(get_existing_track_ids(playlist_id))
         playlist_contents = get_playlist_contents(playlist_id)
+        all_playlist_contents.append(playlist_contents)
 
         with engine.connect() as conn:
             result = conn.execute(text(f"CALL merge_playlist_content({playlist_contents, playlist_id})"))
 
 
 
-        playlist_ids = {id['track_id'] for id in playlist_contents}
+        track_ids = {id['track_id'] for id in playlist_contents}
 
         #new_tracks = [t for t in playlist_contents if t['track_id'] not in existing_tracks]
         #to_delete = [t for t in existing_tracks if t not in playlist_ids]

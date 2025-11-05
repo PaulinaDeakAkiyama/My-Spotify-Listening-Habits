@@ -2,43 +2,14 @@ from threading import *
 from datetime import datetime, timedelta
 import time
 from oauth import create_spotify_client
-from tracker import save_track_to_listening, save_track_to_reference #, get_current_track
 from utils import log_to_sql, safe_spotipy_call
-from db import engine, artists, albums, track_reference
-from sqlalchemy import text, update, insert
+from db import engine, artists, albums, track_reference, listening_two
+from sqlalchemy import text, update, insert, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 
 sp = create_spotify_client()
 
 start_time = datetime.now()
-def tracker():
-    try:
-        while datetime.now() < start_time + timedelta(hours=12):
-            current_track = get_current_track()
-            save_track_to_reference(current_track)
-            save_track_to_listening(current_track)
-            time.sleep(5)
-    except Exception as e:
-        print(f"Error: {type(e).__name__} {e}")
-        log_to_sql('tracker','failed', f"Error: {type(e).__name__} {e}")
-    except KeyboardInterrupt:
-        print('stopped')
-
-D = Thread(target = tracker, daemon=True)
-
-def main():
-    try:
-        while True:
-            print(f'Spotify song tracker started! {start_time}')
-            D.start()
-
-            if datetime.now() > start_time + timedelta(hours=1):
-
-                pass
-    except KeyboardInterrupt:
-        print('Spotify tracker manually stopped')
-    except Exception as e:
-        print(f'whoops {e}')
-
 
 #with engine.connect() as conn:
 #    result = conn.execute(text("CALL delete_filler_dates()"))
@@ -50,7 +21,7 @@ def get_current_track():
         print(f"{datetime.now()}: no track playing")
         return {}
 
-    artists = []
+    artists = {}
     albums = {}
     track_ref = {}
     streaming = {}
@@ -66,7 +37,7 @@ def get_current_track():
 
     ar = current_track['artists']
     for a in ar:
-        artists.append({
+        artists.update({
         'artist_id': a['id'],
         'artist_name': a['name']
         # followers, popularity, genres
@@ -97,7 +68,7 @@ def get_current_track():
         'duration_ms': current_track['duration_ms'],
         'track_id': current_track['id'],
         'device_name': device_info['name'],
-        #'device_type': device_info['type']
+        #'device_type': device_info['type'],
         'volume_percentage': device_info['volume_percent'],
         'popularity': current_track['popularity'],
         'playlist_id': playlist_id_current,
@@ -105,39 +76,81 @@ def get_current_track():
 
     return current_track_info
 
-t = get_current_track()
-
-print(t['listening_two'])
-
 def insert_into_sql(table_name, track_info):
-    data = track_info[table_name]
-    with engine.begin() as conn:
-        conn.execute(insert(table_name), data)
-
+    if not track_info:
+        data = {}
+        with engine.begin() as conn:
+            conn.execute(insert(table_name), data)
+    else:
+        data = track_info[table_name.name]
+        stmt = mysql_insert(table_name).values(**data)
+        stmt = stmt.on_duplicate_key_update(**{k: stmt.inserted[k] for k in data.keys()})
+        with engine.begin() as conn:
+            conn.execute(stmt)
+        print(f'saved track to {table_name}! {track_info[table_name.name]}')
 
 def update_artists():
     with engine.begin() as conn:
-        artist_id = conn.execute(text('SELECT artist_id FROM artists ORDER BY inserted_at LIMIT 1')).scalar()
+        artist_id = conn.execute(select(artists.c.artist_id).order_by(artists.c.inserted_at).limit(1)).scalar()
     data = safe_spotipy_call(sp.artist, artist_id)
-    info = {'followers':data['followers']['total'],'genres':data['genres'] ,'popularity':data['popularity']}
-    print(info)
+    info = {'artist_id':artist_id,'followers': data['followers']['total'], 'genres': data['genres'], 'popularity': data['popularity']}
+    stmt = mysql_insert(artists).values(**info)
+    stmt = stmt.on_duplicate_key_update(**{k: stmt.inserted[k] for k in info.keys()})
     with engine.begin() as conn:
-        conn.execute(
-         update(artists)
-         .where(artists.c.artist_id == artist_id)
-         .values(info)
-        )
+        conn.execute(stmt)
+
 
 def update_albums():
     with engine.begin() as conn:
-        album_id = conn.execute(text('SELECT album_id FROM albums ORDER BY inserted_at LIMIT 1')).scalar()
+        album_id = conn.execute(select(albums.c.album_id).order_by(albums.c.inserted_at).limit(1)).scalar()
     data = safe_spotipy_call(sp.album, album_id)
-    info = {'label':data['label'],'popularity':data['popularity']}
-    print(info)
+    info = {'album_id':album_id,'label':data['label'],'popularity':data['popularity']}
+    stmt = mysql_insert(albums).values(**info)
+    stmt = stmt.on_duplicate_key_update(
+        **{k: stmt.inserted[k] for k in info.keys()}
+    )
     with engine.begin() as conn:
-        conn.execute(
-         update(albums)
-         .where(albums.c.album_id == album_id)
-         .values(info)
-        )
+        conn.execute(stmt)
 
+
+def tracker():
+    print('tracker started')
+    try:
+        while datetime.now() < start_time + timedelta(hours=12):
+            current_track = get_current_track()
+            if not current_track:
+                insert_into_sql(listening_two, current_track)
+                print(f'saved track!! {current_track} {datetime.now()}')
+                time.sleep(5)
+                continue
+            print(f'\n{datetime.now()}: playing: {current_track['track_reference']['track_name']}\n {current_track}')
+            insert_into_sql(artists, current_track)
+            update_artists()
+            insert_into_sql(albums, current_track)
+            update_albums()
+            insert_into_sql(track_reference, current_track)
+            insert_into_sql(listening_two, current_track)
+            time.sleep(5)
+    except Exception as e:
+        print(f"hehe Error: {type(e).__name__} {e}")
+        log_to_sql('tracker','failed', f"Error: {type(e).__name__} {e}")
+    except KeyboardInterrupt:
+        print('stopped')
+
+
+def main():
+    print(f'Spotify song tracker started! {start_time}')
+    try:
+        D = Thread(target=tracker, daemon=True)
+        D.start()
+        while True:
+            print('main running')
+            time.sleep(10)
+    except KeyboardInterrupt:
+        print('Spotify tracker manually stopped')
+    except Exception as e:
+        print(f'whoops {e}')
+
+
+if __name__ == '__main__':
+    main()

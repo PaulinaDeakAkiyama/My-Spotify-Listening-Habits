@@ -197,38 +197,6 @@ def populate_tables_pipeline():
 if __name__ == '__main__':
     populate_tables_pipeline()
 
-# missing_artists = get_missing_artists()
-# missing_albums = get_missing_albums()
-#
-# album_ids = {}
-# artist_ids = {}
-#
-# for ids in chunked(missing_albums, 50):
-#     track_info = safe_spotipy_call(sp.tracks, ids)
-#     album_ids.update({t['id']: t['album']['id'] for t in track_info['tracks']})
-#
-# for ids in chunked(missing_artists, 50):
-#     artist_info = safe_spotipy_call(sp.tracks, ids)
-#     artist_ids.update({t['id']: t['artists'][0]['id'] for t in artist_info['tracks']})
-#
-# print(f'going to insert album ids: {album_ids}\n artist ids: {artist_ids}')
-# try:
-#     with engine.begin() as conn:
-#         for track_id, album_id in album_ids.items():
-#             conn.execute(
-#                 update(track_reference)
-#                 .where(track_reference.c.track_id == track_id)
-#                 .values(album_id=album_id)
-#             )
-#         for track_id, artist_id in artist_ids.items():
-#             conn.execute(
-#                 update(track_reference)
-#                 .where(track_reference.c.track_id == track_id)
-#                 .values(artist_id=artist_id)
-#             )
-# except Exception as e:
-#     print(f'oops {e}')
-# print('done!')
 
 
 # with engine.begin() as conn:

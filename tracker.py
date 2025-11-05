@@ -23,11 +23,20 @@ def get_current_track():
         duration_ms = current_track['duration_ms']
         progress_ms = current_info["progress_ms"]
 
-        album_id = current_track['album']['id']
-        album_name = current_track['album']['name']
+        album = current_track['album']
+        album_id = album['id']
+        album_name = album['name']
+        album_artist = album['artists'][0]['id']
+        album_collab_artist = album['artists'][1]['id'] if len(album['artists']) > 1 else None
+        album_release_date = album['release_date']
+        album_total_tracks = album['total_tracks']
+        album_type = album['type']
+        # label, popularity
+
         artists = current_track['artists']
         artist_id = artists[0]['id']
         artist_name = artists[0]['name']
+        # artist followers, popularity, genres
         collab_artist = artists[1]['id'] if len(artists) > 1 else None
         if current_info and current_info.get("context") and current_info["context"].get("uri"):
             context = current_info['context']
@@ -82,7 +91,7 @@ def save_track_to_listening(track_info):
                 if k in track_info)
     try:
         with engine.begin() as conn:
-            conn.execute(insert(listening_two), track_info)
+            conn.execute(insert(listening_two), data)
             print(f'saved track!! {data} {datetime.now()}')
     except Exception as e:
         print(f'Something went wrong with inserting track: {track_info}\n Error: {e}')
