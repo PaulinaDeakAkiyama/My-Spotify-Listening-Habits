@@ -2,9 +2,9 @@ from threading import *
 from datetime import datetime, timedelta, timezone
 import time
 from oauth import create_spotify_client
-from utils import log_to_sql, safe_spotipy_call
+from utils import log_to_sql, insert_into_sql
 from db import artists, albums, track_reference, listening_two
-from tracker import get_current_track, insert_into_sql, update_albums, update_artists
+from tracker import get_current_track, update_albums, update_artists, deal_with_artists_albums_reference
 #from SCDplaylistsupdate import update_tracks_and_playlists
 from logger import log
 
@@ -32,11 +32,7 @@ def tracker():
             log.info(f'\n{datetime.now()}: playing: {current_track['track_reference']['track_name']}\n {current_track}')
 
             if current_track['listening_two']['track_id'] is not None:
-                insert_into_sql(artists, current_track)
-                update_artists()
-                insert_into_sql(albums, current_track)
-                update_albums()
-                insert_into_sql(track_reference, current_track)
+                deal_with_artists_albums_reference(current_track)
 
             insert_into_sql(listening_two, current_track)
             previous_id = current_track['listening_two']['track_id']

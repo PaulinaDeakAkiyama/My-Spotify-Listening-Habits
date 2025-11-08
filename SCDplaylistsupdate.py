@@ -2,10 +2,10 @@ import json
 
 from oauth import create_spotify_client
 from db import engine, playlists, playlist_tracks, track_reference, listening_two  # track_features, artists, fact
-from sqlalchemy import insert, select, func, update, text
+from sqlalchemy import insert, select, func, update, text, union
 from datetime import datetime, timezone
 import time, logging
-from utils import safe_spotipy_call, chunked, log_to_sql
+from utils import safe_spotipy_call, chunked, log_to_sql, insert_into_sql
 from logger import log
 
 #snapshot_id
@@ -33,23 +33,31 @@ def get_existing_playlists():
     except Exception as e:
         log.error(f'tried to get existing ids: {e}')
 
-
+def get_used_playlists():
+    try:
+        q = union(select(playlist_tracks.c.playlist_id), select(listening_two.c.playlist_id), select(playlists.c.playlist_id))
+        with engine.connect() as conn:
+            return [row[0]for row in conn.execute(q)]
+    except Exception as e:
+        log.error(f'tried to get all ids: {e}')
 #                                                       insert new playlists and return playlist info for sql procedure
-def update_playlists():
+def update_playlists(playlist_ids):
     now = datetime.now(timezone.utc)
-    user_playlists = safe_spotipy_call(sp.current_user_playlists)
-    if not user_playlists or "items" not in user_playlists:
-        log.warning("No playlists retrieved from Spotify.")
-        return []
-
+    user_playlists = safe_spotipy_call(sp.current_user_playlists())
     current_db = get_existing_playlists()
     playlist_info = {}
     new_playlists = []
-    for item in user_playlists["items"]:
-        pid = item["id"]
-        name = item["name"]
-        owner = item["owner"]["id"]
-        total = item["tracks"]["total"]
+    for i in playlist_ids:
+        playlist = safe_spotipy_call(sp.playlist, i)
+
+        if not playlist or "items" not in playlist:
+            log.warning(f"No playlist info retrieved from Spotify. {i}")
+            return []
+
+        pid = playlist["id"]
+        name = playlist["name"]
+        owner = playlist["owner"]["id"]
+        total = playlist["tracks"]["total"]
 
         db_row = current_db.get(pid)
         if not db_row:
@@ -67,7 +75,7 @@ def update_playlists():
             "total_tracks": total}
         })
     if new_playlists:
-        db_execute(insert(playlists).values(new_playlists))
+        insert_into_sql(playlists, new_playlists)
         log.info(f"Inserted {len(new_playlists)} new playlists.")
     return playlist_info
 
@@ -103,9 +111,9 @@ def get_playlist_contents(playlist_id):
 
 
 def update_tracks_and_playlists():
-    playlist_ids = get_existing_playlists()
-    playlist_info = update_playlists()                                  #update playlist ids in sql
-    #playlist_ids = get_existing_playlists()                             #get all playlist ids in sql
+    playlist_ids = get_used_playlists()
+    playlist_info = update_playlists(playlist_ids)                                  #update playlist ids in sql
+    playlist_ids = get_existing_playlists()                             #get all playlist ids in sql. make sure artists and albums are already populated
     for playlist_id in playlist_ids:                                    #check for changes for each id in a procedure
         log.info(f'going through playlist:{playlist_id}...')
         if not playlist_info.get(playlist_id):
@@ -116,10 +124,10 @@ def update_tracks_and_playlists():
         owner_id = info['owner_id']
         total_tracks = info['total_tracks']
         playlist_contents = get_playlist_contents(playlist_id)
-        print(playlist_contents)
         print(playlist_name)
 
         with engine.connect() as conn:
+            log.info('starting sql procedure')
             stmt = text(
                 "CALL merge_playlist_contents(:playlist_contents, :playlist_id, :playlist_name, :owner_id, :total_tracks)")
             conn.execute(
@@ -133,6 +141,7 @@ def update_tracks_and_playlists():
                 }
             )
             conn.commit()
+            log.info('finished sql procedure commit')
 
 
 
