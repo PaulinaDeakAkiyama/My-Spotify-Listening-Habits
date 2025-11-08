@@ -14,8 +14,7 @@ def create_spotify_client():
         redirect_uri=Config.REDIRECT_URI,
         scope=scope
     ), requests_session=session,
-       requests_timeout=10
-    )
+       requests_timeout=10    )
 
 sp = create_spotify_client()
 
