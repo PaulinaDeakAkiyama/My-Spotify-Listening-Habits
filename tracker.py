@@ -16,49 +16,33 @@ def get_current_track():
         log.info(f"{datetime.now()}: no track playing")
         return {'listening_two':{'track_id': None}, 'track_reference':{'track_name': None}}
 
-    artists = []
-    albums = {}
-    track_ref = {}
-    streaming = {}
-    current_track_info = {'artists':artists, 'albums':albums, 'track_reference':track_ref, 'listening_two':streaming}
-
     current_track = current_info.get("item")
     if not current_track:
+        log.warning('no track in current info?')
         return {}
+
     context = current_info.get("context") or {}
     uri = context.get("uri", "")
     playlist_id_current = uri.split(":")[-1] if context.get("type") == "playlist" else None
     album_id_current = uri.split(":")[-1] if context.get("type") == "album" else None
     artist_id_current = uri.split(":")[-1] if context.get("type") == "artist" else None
+
     device_info = current_info.get("device", {})
-
     ar = current_track['artists']
-    for a in ar:
-        artists.append({
-        'artist_id': a['id'],
-        'artist_name': a['name']
-        # followers, popularity, genres
-        })
-
     al = current_track['album']
     alar = al['artists']
+
+    artists = set()
+    for a in ar:
+        artists.add(a['id'])
     for a in alar:
-        artists.append({
-            'artist_id':a['id'],
-            'artist_name':a['name']
-        })
+        artists.add(
+            a['id']
+        )
 
-    albums.update({
-        'album_id': al['id'],
-        'album_name': al['name'],
-        'artist_id': al['artists'][0]['id'],
-        'collab_artist': al['artists'][1]['id'] if len(al['artists'])>1 else None,
-        'release_date': al['release_date'],
-        'total_tracks': al['total_tracks'],
-        #'album_type': al['album_type']
-        # label, popularity
-    })
+    albums = [a['id']]
 
+    track_ref = {}
     track_ref.update({
         'track_id': current_track['id'],
         'track_name': current_track["name"],
@@ -67,6 +51,7 @@ def get_current_track():
         'collab_artist': ar[1]['id'] if len(ar) > 1 else None
     })
 
+    streaming = {}
     streaming.update({
         'progress_ms': current_info['progress_ms'],
         'duration_ms': current_track['duration_ms'],
@@ -78,32 +63,74 @@ def get_current_track():
         'context_id': playlist_id_current or album_id_current or artist_id_current,
         'context_type': context.get('type')
     })
+
+    current_track_info = {'artists': artists, 'albums': albums, 'track_reference': track_ref, 'listening_two': streaming}
     return current_track_info
 
 
+def update_artists(artist_ids):
+    result = safe_streaming_sp_call(sp.artists, artist_ids)
+    artist_info = []
+    for data in result['artists']:
+        info = {
+            'artist_id':data['id'],
+            'artist_name':data['name'],
+            'followers': data['followers']['total'],
+            'genres': data['genres'],
+            'popularity': data['popularity']
+        }
+        artist_info.append(info)
+    insert_into_sql(artists, artist_info)
 
-def update_artists():
-    with engine.begin() as conn:
-        artist_id = conn.execute(select(artists.c.artist_id).order_by(artists.c.inserted_at).limit(1)).scalar()
-    data = safe_streaming_sp_call(sp.artist, artist_id)
-    info = {'artist_id':artist_id,'followers': data['followers']['total'], 'genres': data['genres'], 'popularity': data['popularity']}
-    stmt = mysql_insert(artists).values(**info)
-    stmt = stmt.on_duplicate_key_update(**{k: stmt.inserted[k] for k in info.keys()})
-    with engine.begin() as conn:
-        conn.execute(stmt)
+
+def update_albums(album_ids):
+    result = safe_streaming_sp_call(sp.albums, album_ids)
+    for data in result['albums']:
+        info = {
+            'album_id':data['id'],
+            'album_name': data['name'],
+            'artist_id': data['artists'][0]['id'],
+            'collab_artist': data['artists'][1]['id'] if len(data['artists'])>1 else None,
+            'release_date': data['release_date'],
+            'total_tracks': data['total_tracks'],
+            'album_type': data['album_type'],
+            'label':data['label'],'popularity':data['popularity']
+        }
+        insert_into_sql(albums, info)
+
+with engine.begin() as conn:
+    existing_albums = set(conn.execute(select(albums.c.album_id)).scalars().all())
+    existing_tracks = set(conn.execute(select(track_reference.c.track_id)).scalars().all())
+    existing_artists = set(conn.execute(select(artists.c.artist_id)).scalars().all())
 
 
-def update_albums():
-    with engine.begin() as conn:
-        album_id = conn.execute(select(albums.c.album_id).order_by(albums.c.inserted_at).limit(1)).scalar()
-    data = safe_streaming_sp_call(sp.album, album_id)
-    info = {'album_id':album_id,'label':data['label'],'popularity':data['popularity']}
-    stmt = mysql_insert(albums).values(**info)
-    stmt = stmt.on_duplicate_key_update(
-        **{k: stmt.inserted[k] for k in info.keys()}
-    )
-    with engine.begin() as conn:
-        conn.execute(stmt)
+def deal_with_artists_albums_reference(track_info):
+    """
+    Insert or update artists, albums, and track_reference for a single track_info dict.
+    Updates the existing_* sets to prevent duplicates.
+    """
+    #first check if the song already exists
+    track_ref_info = track_info.get('track_reference')
+    if track_ref_info['track_id'] in existing_tracks:
+        return
+    else:
+
+        artist_set = track_info['artists']
+        album_ids = track_info.get('albums')
+
+        new_albums = [a for a in album_ids if a not in existing_albums]
+        new_artists = [a for a in artist_set if a not in existing_artists]
+        if new_artists:
+            update_artists(new_artists)
+            existing_artists.update(a for a in new_artists)
+        if new_albums:
+            update_albums(new_albums)
+            existing_albums.update(i for i in album_ids)
+
+        insert_into_sql(track_reference, track_ref_info)
+        existing_tracks.add(track_ref_info['track_id'])
+
+    return
 
 
 def save_last_50_tracks(after_ts):
@@ -178,38 +205,3 @@ def safe_streaming_sp_call(method, *args, max_retries=3, delay=3, **kwargs):
             time.sleep(delay)
     log.fatal(f'safe spotipy call: {method.__name__}', 'failed', f'finished retries: {type(e).__name__} {str(e)}')
     return None
-
-
-with engine.begin() as conn:
-    existing_albums = set(conn.execute(select(albums.c.album_id)).scalars().all())
-    existing_tracks = set(conn.execute(select(track_reference.c.track_id)).scalars().all())
-    existing_artists = set(conn.execute(select(artists.c.artist_id)).scalars().all())
-
-
-def deal_with_artists_albums_reference(track_info):
-    """
-    Insert or update artists, albums, and track_reference for a single track_info dict.
-    Updates the existing_* sets to prevent duplicates.
-    """
-    # 1. Artists
-    artist_list = track_info['artists']
-    new_artists = [a for a in artist_list if a['artist_id'] not in existing_artists]
-    if new_artists:
-        insert_into_sql(artists, new_artists)
-        update_artists()
-        existing_artists.update(a['artist_id'] for a in new_artists)
-
-    # 2. Album
-    album_info = track_info.get('albums')
-    if album_info and album_info['album_id'] not in existing_albums:
-        insert_into_sql(albums, album_info)
-        update_albums()
-        existing_albums.add(album_info['album_id'])
-
-    # 3. Track reference
-    track_ref_info = track_info.get('track_reference')
-    if track_ref_info and track_ref_info['track_id'] not in existing_tracks:
-        insert_into_sql(track_reference, track_ref_info)
-        existing_tracks.add(track_ref_info['track_id'])
-
-    return
