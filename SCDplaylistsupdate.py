@@ -45,19 +45,9 @@ def get_all_playlists():
         log.error(f"tried to get all ids: {e}")
         return []
 #                                                       insert new playlists and return playlist info for sql procedure
-def insert_new_playlists(playlist_ids):
-    with engine.begin() as conn:
-        existing_playlists = conn.execute(
-            select(playlists.c.playlist_id)
-            .where(playlists.c.valid_to == '3000-01-01 01:00:00')
-        ).scalars().all()
-
-    new_playlists = []
+def get_playlists_info(playlist_ids):
     playlist_info = {}
     for i in playlist_ids:
-        if i in existing_playlists:
-            log.info(f'skipping {i}')
-            continue
         playlist = safe_spotipy_call(sp.playlist, i)
 
         if not playlist or "items" not in playlist:
@@ -69,13 +59,6 @@ def insert_new_playlists(playlist_ids):
         owner = playlist["owner"]["id"]
         total = playlist["tracks"]["total"]
 
-        new_playlists.append({
-            "playlist_id": pid,
-            "playlist_name": name,
-            "owner_id": owner,
-            "total_tracks": total
-        })
-
         playlist_info.update({
             pid:{
                 "playlist_name": name,
@@ -83,10 +66,7 @@ def insert_new_playlists(playlist_ids):
                 "total_tracks": total}
         })
 
-    if new_playlists:
-        insert_into_sql(playlists, new_playlists)
-        log.info(f"Inserted {len(new_playlists)} new playlists.")
-    return {'name':name, 'owner':owner, 'total':total}
+    return playlist_info
 
 
 def get_playlist_contents(playlist_id):
