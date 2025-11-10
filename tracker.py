@@ -32,15 +32,15 @@ def get_current_track():
     al = current_track['album']
     alar = al['artists']
 
-    artists = set()
+    artists_ids = set()
     for a in ar:
-        artists.add(a['id'])
+        artists_ids.add(a['id'])
     for a in alar:
-        artists.add(
+        artists_ids.add(
             a['id']
         )
 
-    albums = [a['id']]
+    albums_ids = [al['id']]
 
     track_ref = {}
     track_ref.update({
@@ -64,39 +64,57 @@ def get_current_track():
         'context_type': context.get('type')
     })
 
-    current_track_info = {'artists': artists, 'albums': albums, 'track_reference': track_ref, 'listening_two': streaming}
+    current_track_info = {'artists': artists_ids, 'albums': albums_ids, 'track_reference': track_ref, 'listening_two': streaming}
     return current_track_info
 
 
 def update_artists(artist_ids):
-    result = safe_streaming_sp_call(sp.artists, artist_ids)
-    artist_info = []
-    for data in result['artists']:
-        info = {
-            'artist_id':data['id'],
-            'artist_name':data['name'],
-            'followers': data['followers']['total'],
-            'genres': data['genres'],
-            'popularity': data['popularity']
-        }
-        artist_info.append(info)
-    insert_into_sql(artists, artist_info)
+    if not artist_ids:
+        log.warning('no album ids')
+        return
+    try:
+        result = safe_streaming_sp_call(sp.artists, artist_ids)
+        artist_info = []
+        for data in result['artists']:
+            info = {
+                'artist_id':data['id'],
+                'artist_name':data['name'],
+                'followers': data['followers']['total'],
+                'genres': data['genres'],
+                'popularity': data['popularity']
+            }
+            artist_info.append(info)
+        insert_into_sql(artists, artist_info)
+    except Exception as e:
+        log.error(e)
 
 
 def update_albums(album_ids):
-    result = safe_streaming_sp_call(sp.albums, album_ids)
-    for data in result['albums']:
-        info = {
-            'album_id':data['id'],
-            'album_name': data['name'],
-            'artist_id': data['artists'][0]['id'],
-            'collab_artist': data['artists'][1]['id'] if len(data['artists'])>1 else None,
-            'release_date': data['release_date'],
-            'total_tracks': data['total_tracks'],
-            'album_type': data['album_type'],
-            'label':data['label'],'popularity':data['popularity']
-        }
+    if not album_ids:
+        log.warning('no album ids')
+        return
+    try:
+        result = safe_streaming_sp_call(sp.albums, album_ids)
+        albums_list = [a for a in (result.get('albums') or []) if a is not None]
+        if not albums_list:
+            log.warning('no valid albums returned')
+            return False
+        info = []
+        for data in result['albums']:
+            info.append({
+                'album_id':data['id'],
+                'album_name': data['name'],
+                'artist_id': data['artists'][0]['id'],
+                'collab_artist': data['artists'][1]['id'] if len(data['artists'])>1 else None,
+                'release_date': data['release_date'],
+                'total_tracks': data['total_tracks'],
+                'album_type': data['album_type'],
+                'label':data['label'],'popularity':data['popularity']
+            })
         insert_into_sql(albums, info)
+        return True
+    except Exception as e:
+        log.error(e)
 
 with engine.begin() as conn:
     existing_albums = set(conn.execute(select(albums.c.album_id)).scalars().all())
@@ -112,7 +130,7 @@ def deal_with_artists_albums_reference(track_info):
     #first check if the song already exists
     track_ref_info = track_info.get('track_reference')
     if track_ref_info['track_id'] in existing_tracks:
-        return
+        return True
     else:
 
         artist_set = track_info['artists']
@@ -120,17 +138,25 @@ def deal_with_artists_albums_reference(track_info):
 
         new_albums = [a for a in album_ids if a not in existing_albums]
         new_artists = [a for a in artist_set if a not in existing_artists]
+
         if new_artists:
             update_artists(new_artists)
             existing_artists.update(a for a in new_artists)
+
         if new_albums:
-            update_albums(new_albums)
-            existing_albums.update(i for i in album_ids)
+            check = update_albums(new_albums)
+            if check is False:
+                track_ref_info['album_id'] = None
+            else:
+                existing_albums.update(i for i in album_ids)
 
-        insert_into_sql(track_reference, track_ref_info)
-        existing_tracks.add(track_ref_info['track_id'])
+        check = insert_into_sql(track_reference, track_ref_info)
+        if check is True:
+            existing_tracks.add(track_ref_info['track_id'])
+            return True
+        else:
+            return False
 
-    return
 
 
 def save_last_50_tracks(after_ts):
@@ -176,6 +202,7 @@ def save_last_50_tracks(after_ts):
         if new_tracks:
             try:
                 insert_into_sql(listening_history, new_tracks)
+                log.info(f'inserted {len(new_tracks)} back up tracks to listening_history')
             except Exception as e:
                 log.error(f"Error {e}")
 

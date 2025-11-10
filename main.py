@@ -32,11 +32,19 @@ def tracker():
             log.info(f'\n{datetime.now()}: playing: {current_track['track_reference']['track_name']}\n {current_track}')
 
             if current_track['listening_two']['track_id'] is not None:
-                deal_with_artists_albums_reference(current_track)
-
-            insert_into_sql(listening_two, current_track)
-            previous_id = current_track['listening_two']['track_id']
-            time.sleep(5)
+                time.sleep(1)
+                check = deal_with_artists_albums_reference(current_track)
+                if check is True:
+                    insert_into_sql(listening_two, current_track)
+                    previous_id = current_track['listening_two']['track_id']
+                    time.sleep(4)
+                else:
+                    log.warning(f'deal with albums artists reference check: {check}')
+                    time.sleep(2)
+                    continue
+            else:
+                insert_into_sql(listening_two, current_track)
+                time.sleep(5)
 
     except Exception as e:
         log.error(f"hehe Error: {type(e).__name__} {e}")

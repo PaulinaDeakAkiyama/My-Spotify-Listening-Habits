@@ -83,7 +83,7 @@ def insert_into_sql(table_name, info):
                     conn.execute(insert(table_name), data)
             else:
                 log.warning('no info to insert')
-                return
+                return False
 
         elif isinstance(info, list):
             if not info:
@@ -91,7 +91,7 @@ def insert_into_sql(table_name, info):
             with engine.begin() as conn:
                 conn.execute(insert(table_name), info)
             log.info(f'saved {len(info)} records to {table_name.name}!')
-            return
+            return True
 
         else:
             data = info.get(table_name.name, info) or info[table_name.name]
@@ -99,16 +99,17 @@ def insert_into_sql(table_name, info):
                 with engine.begin() as conn:
                     conn.execute(insert(table_name), data)
                 log.info(f'saved info {len(info)} to {table_name}!')
-                return
+                return True
 
             stmt = mysql_insert(table_name).values(**data)
             stmt = stmt.on_duplicate_key_update(**{k: stmt.inserted[k] for k in data.keys()})
             with engine.begin() as conn:
                 conn.execute(stmt)
             log.info(f'saved info to {table_name}!')
-            return
+            return True
 
     except Exception as e:
         log.fatal(f'couldnt insert into {table_name.name}. {e}')
         log_to_sql('inserting to artists', 'failed', f"Error: {type(e).__name__} {e}")
+        return False
 
