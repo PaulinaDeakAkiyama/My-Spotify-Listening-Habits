@@ -3,10 +3,11 @@ from datetime import datetime, timedelta, timezone
 import time
 from oauth import create_spotify_client
 from utils import log_to_sql, insert_into_sql, safe_spotipy_call
-from db import artists, albums, track_reference, listening_two
+from db import artists, albums, track_reference, listening_two, engine
 from tracker import get_current_track, update_albums, update_artists, deal_with_artists_albums_reference
 #from SCDplaylistsupdate import update_tracks_and_playlists
 from logger import log
+from sqlalchemy import select
 
 sp = create_spotify_client()
 
@@ -24,3 +25,12 @@ for track in tracks['items']:
         #'duration_ms': track['duration_ms']
     })
     print(track_ref)
+
+with engine.begin() as conn:
+    ids = conn.execute(select(albums.c.album_id).limit(5)).scalars().all()
+
+corresponding = safe_spotipy_call(sp.albums, ids)
+for c in corresponding.get('albums'):
+    tracks = c['tracks']
+    for track in tracks['items']:
+        print(track['name'])

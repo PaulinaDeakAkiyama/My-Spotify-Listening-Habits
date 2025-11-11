@@ -138,9 +138,7 @@ def get_album_info(my_albums):
             print('no albums')
             return []
 
-        with engine.begin() as conn:
-            existing_albums = set(conn.execute(select(albums.c.album_id)).scalars().all())
-            filtered_album_ids = [aid for aid in my_albums if aid not in existing_albums]
+        filtered_album_ids = [aid for aid in my_albums if aid not in existing_albums]
 
         album_info = []
         for ids in chunked(filtered_album_ids, 20):
@@ -219,8 +217,31 @@ def get_artist_info(my_artists):
     except Exception as e:
         log.error(f'something happend in get artist info {e}')
 
+def start_playlists_procedure(table_data, playlist_info, playlist_id):
+    playlist_contents = table_data['playlist_tracks']
+    playlist_id = playlist_id
+    playlist_name = playlist_info[i]['name']
+    owner_id = playlist_info[i]['owner']
+    total_tracks = p_info[i]['total']
+    with engine.connect() as conn:
+        log.info('starting sql procedure')
+        stmt = text(
+            "CALL merge_playlist_contents(:playlist_contents, :playlist_id, :playlist_name, :owner_id, :total_tracks)")
+        conn.execute(
+            stmt,
+            {
+                "playlist_contents": json.dumps(playlist_contents),
+                "playlist_id": playlist_id,
+                "playlist_name": playlist_name,
+                "owner_id": owner_id,
+                "total_tracks": total_tracks
+            }
+        )
+        conn.commit()
+        log.info('finished sql procedure commit')
 
-def populate_tables_with_playlists_pipeline():
+
+def populate_playlists_and_albums_pipeline():
     """Look for new playlists in listening_two, get track ids with playlists contents then album and artist ids with
     get track reference info. insert into artists, albums, track reference, playlists and playlist tracks in order"""
     try:
@@ -241,11 +262,11 @@ def populate_tables_with_playlists_pipeline():
                 if tref_artist_ids or album_ids:
                     album_info = get_album_info(album_ids)
                     if not album_info:
-                        log.warning('album_ids passed to spotify but no info')
+                        log.warning('album_ids passed to spotify but no info returned')
                         artist_ids = tref_artist_ids
                     else :
                         album_artist_ids = [aid for i in album_info for aid in i['artist_id']]
-                        artist_ids = set(album_artist_ids + tref_artist_ids)
+                        artist_ids = tref_artist_ids.update(album_artist_ids)
 
                     log.info(f'artist_ids: {artist_ids}')
                     artist_info = get_artist_info(artist_ids)
@@ -283,6 +304,7 @@ def populate_tables_with_playlists_pipeline():
                 conn.commit()
                 log.info('finished sql procedure commit')
 
+
     except KeyboardInterrupt:
         log.info('cancelled')
     except Exception as e:
@@ -294,11 +316,13 @@ def populate_track_ref_with_album_contents():
     try:
         with engine.begin() as conn:
             my_albums = set(conn.execute(select(albums.c.album_id)).scalars().all())
-            existing_tracks = set(conn.execute(select(track_reference.c.track_id)).scalars().all())
-            existing_full_albums = set(conn.execute(text("select a.album_id, a.total_tracks, count(t.track_id) as c\
-                                                         from albums a left join track_reference on t.album_id = a.album_id\
-                                                         group by a.album_id\
-                                                         having c == a.total_tracks")))
+            existing_full_albums = set(conn.execute(
+                text(
+                    "select a.album_id, a.total_tracks, count(t.track_id) as c\
+                     from albums a left join track_reference on t.album_id = a.album_id\
+                     group by a.album_id\
+                     having c == a.total_tracks"))
+            )
 
         all_artists = set()
         new_track_filter = set()
@@ -316,7 +340,7 @@ def populate_track_ref_with_album_contents():
                 ofs = 50
                 all_tracks = []
                 while True:
-                    log.info(f"getting playlist {i} tracks from offset {ofs}")
+                    log.info(f"getting album {i} tracks from offset {ofs}")
                     additional_tracks = safe_spotipy_call(sp.album_tracks, i, limit=50, offset=ofs)
                     all_tracks.append(additional_tracks)
                     if not additional_tracks:
