@@ -47,11 +47,12 @@ def get_all_playlists():
         log.error(f'tried to get all playlist ids {e}')
 #                                                       insert new playlists and return playlist info for sql procedure
 def get_playlists_info(playlist_ids):
+
     playlist_info = {}
     for i in playlist_ids:
         playlist = safe_spotipy_call(sp.playlist, i)
-
-        if not playlist or "items" not in playlist:
+        print(playlist.keys())
+        if not playlist:
             log.warning(f"No playlist info retrieved from Spotify. {i}")
             continue
 
@@ -62,9 +63,9 @@ def get_playlists_info(playlist_ids):
 
         playlist_info.update({
             pid:{
-                "playlist_name": name,
-                "owner_id": owner,
-                "total_tracks": total}
+                "name": name,
+                "owner": owner,
+                "total": total}
         })
 
     return playlist_info
@@ -73,63 +74,55 @@ def get_playlists_info(playlist_ids):
 def get_playlist_contents(playlist_id):
     #with engine.begin() as conn:
     #    existing_track_ref = set(conn.execute(select(track_reference.c.track_id)).scalars().all())
+    try:
+        log.info(f'going to get tracks for playlist: {playlist_id}')
+        ofs = 0
+        playlist_contents = []
+        seen_tracks = set()
+        track_ref_info = []
+        while True:
+            log.info(f"getting playlist {playlist_id} tracks from offset {ofs}")
+            items = safe_spotipy_call(
+                sp.playlist_items, playlist_id=playlist_id, limit=100, offset=ofs).get('items',[])
 
-    log.info(f'going to get tracks for playlist: {playlist_id}')
-    ofs = 0
-    playlist_contents = []
-    seen_tracks = set()
-    track_ref_info = []
-    artist_ids = set()
-    album_ids = set()
-    while True:
-        log.info(f"getting playlist {playlist_id} tracks from offset {ofs}")
-        items = safe_spotipy_call(
-            sp.playlist_items, playlist_id=playlist_id, limit=100, offset=ofs).get('items',[])
+            if not items:
+                log.info(f"No more tracks. {playlist_id} has {len(playlist_contents)} items")
+                table_info = {'playlist_tracks': playlist_contents,
+                              'track_reference':track_ref_info}
+                return table_info
 
-        if not items:
-            log.info(f"No more tracks. {playlist_id} has {len(playlist_contents)} items")
-            table_info = {'playlist_tracks': playlist_contents,
-                          'track_reference':track_ref_info,
-                          'artists':artist_ids,
-                          'albums':album_ids}
-            return table_info
+            for item in items:
+                track = item.get('track')
+                if not track:
+                    log.warning(f'Missing track in playlist id {playlist_id}\n {item}?')
+                    print['']
+                    added_at = item['added_at']
+                    added_by = item['added_by']['id']
+                    downloaded = item['is_local']
+                    continue
+                if track['id'] not in existing_tracks:
+                    if track['id'] not in seen_tracks:
+                        artists_v = [a['id'] for a in track['artists']]
+                        track_ref_info.append({
+                            'track_id' : track['id'],
+                            'track_name' : track['name'],
+                            'album_id' : track['album']['id'],
+                            'artist_id' : artists_v[0],
+                            'collab_artist' : artists_v[1] if len(artists_v) > 1 else None
+                        })
+                        seen_tracks.add(track['id'])
 
-        for item in items:
-            track = item.get('track')
-            if not track:
-                log.warning(f'No track in playlist id {playlist_id}?')
-                continue
-            if track not in existing_tracks:
-                if track not in seen_tracks:
-                    track_id = track['id']
-                    track_name = track['name']
-                    album = track['album']['name']
-                    album_id = track['album']['id']
-                    artists_v = [i['id']for i in track['artists']]
-
-                    artist_ids.update(i for i in artists_v if i not in existing_artists)
-                    if album_id not in existing_albums:
-                        album_ids.add(album_id)
-
-                    track_ref_info.append({
-                        'track_id' : track_id,
-                        'track_name' : track_name,
-                        'album' : album,
-                        'album_id' : album_id,
-                        'artist_id' : artists_v[0],
-                        'collab_artist' : artists_v[1] if len(artists_v) > 1 else None
-                    })
-                    seen_tracks.add(track_id)
-
-            playlist_contents.append({
-                'track_id': track['id'],
-                'added_at':str(datetime.fromisoformat(item['added_at'].replace('Z', '+00:00'))),
-                'added_by':item['added_by']['id'],
-                'playlist_id':playlist_id,
-                'downloaded':item['is_local']
-            })
-        ofs += 100
-        time.sleep(0.5)
+                playlist_contents.append({
+                    'track_id': track['id'],
+                    'added_at':str(datetime.fromisoformat(item['added_at'].replace('Z', '+00:00'))),
+                    'added_by':item['added_by']['id'],
+                    'playlist_id':playlist_id,
+                    'downloaded':item['is_local']
+                })
+            ofs += 100
+            time.sleep(0.5)
+    except Exception as e:
+        log.error(e)
 
 
 def get_album_info(my_albums):
@@ -217,35 +210,13 @@ def get_artist_info(my_artists):
     except Exception as e:
         log.error(f'something happend in get artist info {e}')
 
-def start_playlists_procedure(table_data, playlist_info, playlist_id):
-    playlist_contents = table_data['playlist_tracks']
-    playlist_id = playlist_id
-    playlist_name = playlist_info[i]['name']
-    owner_id = playlist_info[i]['owner']
-    total_tracks = p_info[i]['total']
-    with engine.connect() as conn:
-        log.info('starting sql procedure')
-        stmt = text(
-            "CALL merge_playlist_contents(:playlist_contents, :playlist_id, :playlist_name, :owner_id, :total_tracks)")
-        conn.execute(
-            stmt,
-            {
-                "playlist_contents": json.dumps(playlist_contents),
-                "playlist_id": playlist_id,
-                "playlist_name": playlist_name,
-                "owner_id": owner_id,
-                "total_tracks": total_tracks
-            }
-        )
-        conn.commit()
-        log.info('finished sql procedure commit')
-
 
 def populate_playlists_and_albums_pipeline():
     """Look for new playlists in listening_two, get track ids with playlists contents then album and artist ids with
     get track reference info. insert into artists, albums, track reference, playlists and playlist tracks in order"""
     try:
-        playlist_ids = get_all_playlists()
+
+        playlist_ids = ['6YgRySvPiqRmmsDDyu98cb']#get_all_playlists()
         p_info = get_playlists_info(playlist_ids)
 
         for i in playlist_ids:
@@ -254,43 +225,17 @@ def populate_playlists_and_albums_pipeline():
                 log.warning(f'no playlist contents for playlist {i}')
                 continue
 
-            if table_data.get('track_reference'):
-                track_reference_info = table_data['track_reference']
-                tref_artist_ids = table_data['artists']
-                album_ids = table_data['albums']
-
-                if tref_artist_ids or album_ids:
-                    album_info = get_album_info(album_ids)
-                    if not album_info:
-                        log.warning('album_ids passed to spotify but no info returned')
-                        artist_ids = tref_artist_ids
-                    else :
-                        album_artist_ids = [aid for i in album_info for aid in i['artist_id']]
-                        artist_ids = tref_artist_ids.update(album_artist_ids)
-
-                    log.info(f'artist_ids: {artist_ids}')
-                    artist_info = get_artist_info(artist_ids)
-
-                    for album in album_info:
-                        album['artist_id'] = album['artist_id'][0]
-                    for track in track_reference_info:
-                        track['artist_id'] = track['artist_id'][0]
-
-                    log.info('going to try to insert new artists and albums')
-                    insert_into_sql(artists, artist_info)
-                    insert_into_sql(albums, album_info)
-                log.info('going to try to insert track ref')
-                insert_into_sql(track_reference, track_reference_info)
-
+            track_reference_info = table_data.get('track_reference', [])
             playlist_contents = table_data['playlist_tracks']
             playlist_id = i
             playlist_name = p_info[i]['name']
             owner_id = p_info[i]['owner']
             total_tracks = p_info[i]['total']
+            log.info(f'sending to procedure\n playlist contents:{len(playlist_contents)}\n{json.dumps(playlist_contents)}\npid:{playlist_id}\nname: {playlist_name}\nowner: {owner_id}\n total: {total_tracks}\n trak: {len(track_reference_info)} {json.dumps(track_reference_info)}')
             with engine.connect() as conn:
                 log.info('starting sql procedure')
                 stmt = text(
-                    "CALL merge_playlist_contents(:playlist_contents, :playlist_id, :playlist_name, :owner_id, :total_tracks)")
+                    "CALL merge_playlist_contents(:playlist_contents, :playlist_id, :playlist_name, :owner_id, :total_tracks, :track_ref)")
                 conn.execute(
                     stmt,
                     {
@@ -298,17 +243,17 @@ def populate_playlists_and_albums_pipeline():
                         "playlist_id": playlist_id,
                         "playlist_name": playlist_name,
                         "owner_id": owner_id,
-                        "total_tracks": total_tracks
+                        "total_tracks": total_tracks,
+                        "track_ref": json.dumps(track_reference_info)
                     }
                 )
                 conn.commit()
                 log.info('finished sql procedure commit')
-
-
     except KeyboardInterrupt:
         log.info('cancelled')
     except Exception as e:
         log.error(e)
+populate_playlists_and_albums_pipeline()
 
 
 def populate_track_ref_with_album_contents():
@@ -379,10 +324,6 @@ def populate_track_ref_with_album_contents():
         log.error(e)
 
 
-
-if __name__ == '__main__':
-    populate_tables_with_playlists_pipeline()
-    populate_track_ref_with_album_contents()
 
 
 
