@@ -8,8 +8,6 @@ from tracker import get_current_track, update_albums, update_artists, deal_with_
 #from SCDplaylistsupdate import update_tracks_and_playlists
 from logger import log
 
-sp = create_spotify_client()
-
 
 def tracker():
     log.info('tracker started')

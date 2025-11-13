@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from PIL.ImageChops import offset
-from utils import safe_spotipy_call, chunked, log_to_sql, insert_into_sql
+from utils import safe_spotipy_call, chunked, log_to_sql, insert_into_sql, safe_request
 from db import engine, track_reference, listening_two, albums, artists, playlist_tracks, playlists
 from sqlalchemy import select, insert, func, update, distinct, and_, text
 from oauth import create_spotify_client
@@ -18,113 +18,6 @@ sp = create_spotify_client()
 #----------------------------------------get track reference info--------------------------------------
 #---------------------------------------   Insert into album table --------------------------------------------------
 #---------------------------------------  album ids in track reference ------------------------------------------------
-
-def get_all_playlists():
-    try:
-        q = select(listening_two.c.context_id).where(
-            and_(
-                listening_two.c.context_type == 'playlist',
-                listening_two.c.context_id.isnot(None)
-            )
-        ).union(
-            select(playlists.c.playlist_id)
-        )
-        with engine.connect() as conn:
-            sql_p_ids = [row[0] for row in conn.execute(q)]
-        sp_user_p = []
-        ofs = 0
-        while True:
-            page = safe_spotipy_call(sp.current_user_playlists, limit=50, offset=ofs)
-            if not page or not page.get('items'):
-                break
-            sp_user_p.extend(p['id'] for p in page['items'])
-            if page['next'] is None:
-                break
-            ofs += 50
-
-        return set(sp_user_p + sql_p_ids)
-    except Exception as e:
-        log.error(f'tried to get all playlist ids {e}')
-#                                                       insert new playlists and return playlist info for sql procedure
-def get_playlists_info(playlist_ids):
-
-    playlist_info = {}
-    for i in playlist_ids:
-        playlist = safe_spotipy_call(sp.playlist, i)
-        print(playlist.keys())
-        if not playlist:
-            log.warning(f"No playlist info retrieved from Spotify. {i}")
-            continue
-
-        pid = playlist["id"]
-        name = playlist["name"]
-        owner = playlist["owner"]["id"]
-        total = playlist["tracks"]["total"]
-
-        playlist_info.update({
-            pid:{
-                "name": name,
-                "owner": owner,
-                "total": total}
-        })
-
-    return playlist_info
-
-
-def get_playlist_contents(playlist_id):
-    #with engine.begin() as conn:
-    #    existing_track_ref = set(conn.execute(select(track_reference.c.track_id)).scalars().all())
-    try:
-        log.info(f'going to get tracks for playlist: {playlist_id}')
-        ofs = 0
-        playlist_contents = []
-        seen_tracks = set()
-        track_ref_info = []
-        while True:
-            log.info(f"getting playlist {playlist_id} tracks from offset {ofs}")
-            items = safe_spotipy_call(
-                sp.playlist_items, playlist_id=playlist_id, limit=100, offset=ofs).get('items',[])
-
-            if not items:
-                log.info(f"No more tracks. {playlist_id} has {len(playlist_contents)} items")
-                table_info = {'playlist_tracks': playlist_contents,
-                              'track_reference':track_ref_info}
-                return table_info
-
-            for item in items:
-                track = item.get('track')
-                if not track:
-                    log.warning(f'Missing track in playlist id {playlist_id}\n {item}?')
-                    print['']
-                    added_at = item['added_at']
-                    added_by = item['added_by']['id']
-                    downloaded = item['is_local']
-                    continue
-                if track['id'] not in existing_tracks:
-                    if track['id'] not in seen_tracks:
-                        artists_v = [a['id'] for a in track['artists']]
-                        track_ref_info.append({
-                            'track_id' : track['id'],
-                            'track_name' : track['name'],
-                            'album_id' : track['album']['id'],
-                            'artist_id' : artists_v[0],
-                            'collab_artist' : artists_v[1] if len(artists_v) > 1 else None
-                        })
-                        seen_tracks.add(track['id'])
-
-                playlist_contents.append({
-                    'track_id': track['id'],
-                    'added_at':str(datetime.fromisoformat(item['added_at'].replace('Z', '+00:00'))),
-                    'added_by':item['added_by']['id'],
-                    'playlist_id':playlist_id,
-                    'downloaded':item['is_local']
-                })
-            ofs += 100
-            time.sleep(0.5)
-    except Exception as e:
-        log.error(e)
-
-
 def get_album_info(my_albums):
     try:
         if not my_albums:
@@ -211,22 +104,137 @@ def get_artist_info(my_artists):
         log.error(f'something happend in get artist info {e}')
 
 
+def get_all_playlists():
+    try:
+        q = select(listening_two.c.context_id).where(
+            and_(
+                listening_two.c.context_type == 'playlist',
+                listening_two.c.context_id.isnot(None)
+            )
+        ).union(
+            select(playlists.c.playlist_id)
+        )
+        with engine.connect() as conn:
+            sql_p_ids = [row[0] for row in conn.execute(q)]
+        sp_user_p = []
+        ofs = 0
+        while True:
+            page = safe_spotipy_call(sp.current_user_playlists, limit=50, offset=ofs)
+            if not page or not page.get('items'):
+                break
+            sp_user_p.extend(p['id'] for p in page['items'])
+            if page['next'] is None:
+                break
+            ofs += 50
+
+        return set(sp_user_p + sql_p_ids)
+    except Exception as e:
+        log.error(f'tried to get all playlist ids {e}')
+#                                                       insert new playlists and return playlist info for sql procedure
+def get_playlists_info(playlist_id):
+    try:
+        playlist_contents = []
+        playlist_info = {}
+        track_ref_info = []
+        none_tracks = 0
+        seen_tracks = set()
+        next_ = True
+        url = 'https://api.spotify.com/v1/playlists/6YgRySvPiqRmmsDDyu98cb'
+        method = 'GET'
+
+        log.info(f"getting playlist {playlist_id} tracks")
+
+        while next_:
+            log.info(f"getting playlist {playlist_id} tracks")
+            playlist = safe_request(method=method, url=url)
+
+            log.info(playlist.keys())
+            if not playlist.get('tracks', {}).get('items', []):
+                items = playlist['items']
+                next_url = playlist['next']
+            else:
+                items = playlist['tracks']['items']
+                next_url = playlist['tracks']['next']
+
+                playlist_info.update({
+                    playlist_id: {
+                        "name": playlist['name'],
+                        "owner": playlist['owner']['id'],
+                        "total": playlist['tracks']['total']
+                    }
+                })
+
+            if not next_url:
+                log.info('No more next... last batch of tracks')
+                next_ = False
+
+            for item in items:
+                track = item.get('track')
+                if not track:
+                    log.warning(f'Missing track in playlist id {playlist_id}\n {item}?')
+                    none_tracks += 1
+                    deleted_track_id = f'deleted_{none_tracks}'
+                    playlist_contents.append({
+                        'track_id': deleted_track_id,
+                        'added_at': item['added_at'],
+                        'added_by': item['added_by']['id'],
+                        'playlist_id': playlist_id,
+                        'downloaded': item['is_local']
+                    })
+                    log.warning(deleted_track_id)
+                    continue
+
+                if track['id'] not in existing_tracks:
+                    if track['id'] not in seen_tracks:
+                        log.info('New track ref info!')
+                        artists_v = [a['id'] for a in track['artists']]
+                        track_ref_info.append({
+                            'track_id': track['id'],
+                            'track_name': track['name'],
+                            'album_id': track['album']['id'],
+                            'artist_id': artists_v[0],
+                            'collab_artist': artists_v[1] if len(artists_v) > 1 else None
+                        })
+                        seen_tracks.add(track['id'])
+                        log.info(f'added track to new ref! {track['name']}')
+
+                playlist_contents.append({
+                    'track_id': item['track']['id'],
+                    'added_at': str(datetime.fromisoformat(item['added_at'].replace('Z', '+00:00'))),
+                    'added_by': item['added_by']['id'],
+                    'playlist_id': playlist_id,
+                    'downloaded': item['is_local']
+                })
+
+            url = next_url
+            log.info('getting next tracks')
+            time.sleep(1)
+
+        playlist_info[playlist_id]['total'] = playlist_info[playlist_id]['total'] - none_tracks
+        table_data = {'playlist_info': playlist_info, 'playlist_contents': playlist_contents, 'track_reference':track_ref_info}
+        log.info(f'Done getting tracks for playlist {playlist_id}')
+        return table_data
+    except Exception as e:
+        log.error(e)
+
+
 def populate_playlists_and_albums_pipeline():
     """Look for new playlists in listening_two, get track ids with playlists contents then album and artist ids with
     get track reference info. insert into artists, albums, track reference, playlists and playlist tracks in order"""
     try:
 
         playlist_ids = ['6YgRySvPiqRmmsDDyu98cb']#get_all_playlists()
-        p_info = get_playlists_info(playlist_ids)
 
         for i in playlist_ids:
-            table_data = get_playlist_contents(i)
+            table_data = get_playlists_info(i)
+
             if table_data is None:
                 log.warning(f'no playlist contents for playlist {i}')
                 continue
+            p_info = table_data['playlist_info']
 
             track_reference_info = table_data.get('track_reference', [])
-            playlist_contents = table_data['playlist_tracks']
+            playlist_contents = table_data['playlist_contents']
             playlist_id = i
             playlist_name = p_info[i]['name']
             owner_id = p_info[i]['owner']

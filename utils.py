@@ -5,6 +5,9 @@ from sqlalchemy import insert, select, func, text
 import spotipy
 from logger import log
 from sqlalchemy.dialects.mysql import insert as mysql_insert
+from oauth import oauth_header
+
+
 
 
 thread_local = threading.local()
@@ -37,6 +40,8 @@ def get_session():
 
 def safe_request(method: str,url: str,headers=None,params=None,data=None,max_retries: int = 3,delay: float = 3.0):
     session = get_session()
+    if headers is None:
+        headers = oauth_header
     for attempt in range(max_retries):
         try:
             response = session.request(
