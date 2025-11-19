@@ -118,3 +118,17 @@ def insert_into_sql(table_name, info):
         log_to_sql('inserting to artists', 'failed', f"Error: {type(e).__name__} {e}")
         return False
 
+def get_existing_ids(table):
+    with engine.begin() as conn:
+        if table.name == 'track_reference':
+            table_id = 'track_id'
+        elif table.name == 'albums':
+            table_id = 'album_id'
+        elif table.name == 'artists':
+            table_id = 'artist_id'
+
+        stmt = text(f"SELECT {table_id} FROM {table.name}")
+        existing_ids = set(conn.execute(stmt).scalars().all())
+
+    return existing_ids
+

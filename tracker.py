@@ -2,7 +2,7 @@ from oauth import create_spotify_client
 from datetime import datetime, timezone, UTC
 from sqlalchemy import insert, select, func
 from db import engine, listening_two, track_reference, artists, albums, listening_history
-from utils import  safe_spotipy_call, insert_into_sql
+from utils import safe_spotipy_call, insert_into_sql, get_existing_ids
 from sqlalchemy import text, update, insert, select
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 sp = create_spotify_client()
@@ -116,11 +116,9 @@ def update_albums(album_ids):
     except Exception as e:
         log.error(e)
 
-with engine.begin() as conn:
-    existing_albums = set(conn.execute(select(albums.c.album_id)).scalars().all())
-    existing_tracks = set(conn.execute(select(track_reference.c.track_id)).scalars().all())
-    existing_artists = set(conn.execute(select(artists.c.artist_id)).scalars().all())
-
+existing_tracks = get_existing_ids(track_reference)
+existing_albums = get_existing_ids(albums)
+existing_artists = get_existing_ids(artists)
 
 def deal_with_artists_albums_reference(track_info):
     """
@@ -132,7 +130,6 @@ def deal_with_artists_albums_reference(track_info):
     if track_ref_info['track_id'] in existing_tracks:
         return True
     else:
-
         artist_set = track_info['artists']
         album_ids = track_info.get('albums')
 
