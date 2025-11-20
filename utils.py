@@ -122,12 +122,14 @@ def get_existing_ids(table):
     with engine.begin() as conn:
         if table.name == 'track_reference':
             table_id = 'track_id'
+            stmt = text(f"SELECT {table_id} FROM {table.name} WHERE album_id IS NOT NULL")
         elif table.name == 'albums':
             table_id = 'album_id'
+            stmt = text(f"SELECT {table_id} FROM {table.name}")
         elif table.name == 'artists':
             table_id = 'artist_id'
+            stmt = text(f"SELECT {table_id} FROM {table.name}")
 
-        stmt = text(f"SELECT {table_id} FROM {table.name}")
         existing_ids = set(conn.execute(stmt).scalars().all())
 
     return existing_ids

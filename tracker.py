@@ -61,7 +61,8 @@ def get_current_track():
         'volume_percentage': device_info['volume_percent'],
         'popularity': current_track['popularity'],
         'context_id': playlist_id_current or album_id_current or artist_id_current,
-        'context_type': context.get('type')
+        'context_type': context.get('type'),
+        'playlist_fk': 1
     })
 
     current_track_info = {'artists': artists_ids, 'albums': albums_ids, 'track_reference': track_ref, 'listening_two': streaming}
@@ -70,7 +71,7 @@ def get_current_track():
 
 def update_artists(artist_ids):
     if not artist_ids:
-        log.warning('no album ids')
+        log.warning('no artist ids')
         return
     try:
         result = safe_streaming_sp_call(sp.artists, artist_ids)
@@ -117,8 +118,7 @@ def update_albums(album_ids):
         log.error(e)
 
 existing_tracks = get_existing_ids(track_reference)
-existing_albums = get_existing_ids(albums)
-existing_artists = get_existing_ids(artists)
+
 
 def deal_with_artists_albums_reference(track_info):
     """
@@ -130,6 +130,8 @@ def deal_with_artists_albums_reference(track_info):
     if track_ref_info['track_id'] in existing_tracks:
         return True
     else:
+        existing_albums = get_existing_ids(albums)
+        existing_artists = get_existing_ids(artists)
         artist_set = track_info['artists']
         album_ids = track_info.get('albums')
 
