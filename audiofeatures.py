@@ -1,60 +1,15 @@
 import time, os, subprocess, re, requests, concurrent.futures
-from db import engine, my_tracks, track_features
+from db import engine, playlist_tracks, track_features, track_reference
 from sqlalchemy import insert, select, func, text
 from oauth import create_spotify_client
 from datetime import datetime, time as dtime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
+from utils import chunked, chunked_d, safe_request, sanitize_filename, log_to_sql, get_session, safe_spotipy_call
+from logger import log
 
-thread_local = threading.local()
 sp = create_spotify_client()
 os.makedirs("previews", exist_ok=True)
 
-#--------------------------------------------------------HELPERS---------------------------------------------------------
-
-def log_to_sql(stage, status, message):
-    with engine.begin() as conn:
-        conn.execute(
-            text("INSERT INTO logging (stage, status, message) VALUES (:s, :st, :m)"),
-            {"s": stage, "st": status, "m": str(message)[:5000]}
-        )
-def chunked(iterable, size):
-    lst = list(iterable)
-    for i in range(0, len(lst), size):
-        yield lst[i:i + size]
-
-def chunked_d(d, size):
-    items = list(d.items())
-    for i in range(0, len(items), size):
-        yield dict(items[i:i + size])
-
-def sanitize_filename(name):
-    """Removes characters not allowed in filenames."""
-    return re.sub(r'[\\/*?:"<>|]', '_', name)
-
-
-def get_session():
-    if not hasattr(thread_local, "session"):
-        thread_local.session = requests.Session()
-    return thread_local.session
-
-def safe_request(method: str,url: str,headers=None,params=None,data=None,max_retries: int = 3,delay: float = 3.0):
-    session = get_session()
-    for attempt in range(max_retries):
-        try:
-            response = session.request(
-                method, url,
-                headers=headers,
-                params=params,
-                data=data
-            )
-            if response.status_code == 200:
-                return response.json()
-        except requests.RequestException as e:
-            log_to_sql("safe_request", "fail", f"{url} failed: {type(e).__name__} {str(e)}")
-            time.sleep(3)
-            continue
-    return None
 
 #-----------------------------------STAGE ONE, get missing audio features-------------------------------
 
@@ -62,15 +17,15 @@ def get_missing_tracks():
     """Return track_id:[track_name, track_artist] for all tracks with no features"""
     with engine.connect() as conn:
         result = conn.execute(
-            select(my_tracks.c.track_id, my_tracks.c.track_name, my_tracks.c.artist_name)
+            select(track_reference.c.track_id, track_reference.c.track_name, track_reference.c.artist_name)
             .where(
-                my_tracks.c.track_id.not_in(
+                track_reference.c.track_id.not_in(
                     select(func.coalesce(track_features.c.track_id, 0))
                 )
             )
         ).all()
         id_track_artist = {a: [b, c] for a, b, c in result}
-    print(f'Found {len(id_track_artist)}')
+    log.info(f'Found {len(id_track_artist)}')
     return id_track_artist
 
 #----------------------------------------STAGE TWO find features with reccobeats-----------------------------------------------
@@ -83,7 +38,7 @@ def get_reccobeats_id(spotify_ids):
     tracks = safe_request(method, url, headers=headers)
 
     if not tracks or 'content' not in tracks or not tracks['content']:
-        print('no corresponding reccobeat_id')
+        log.warning('no corresponding reccobeat_id')
         return[]
 
     reccobeats_ids = [track['id'] for track in tracks['content'] if track['id']]
@@ -96,7 +51,7 @@ def get_track_features(reccobeats_ids):
     batch_features = safe_request("GET", url, headers=headers)
 
     if not batch_features or 'content' not in batch_features or not batch_features['content']:
-        print('no features')
+        log.warning('no features corresponding to reccobeats ids')
         return []
 
     batch_track_features = []
@@ -115,45 +70,47 @@ def get_track_features(reccobeats_ids):
             "tempo": features['tempo'],
             "valence": features['valence']
         })
-        print(batch_track_features)
+    log.info(f'found {len(batch_track_features)} track features')
     return batch_track_features
 
 
 def save_track_features(id_track_artist):
+    if not id_track_artist:
+        return
     my_track_ids = [id for id in id_track_artist.keys()]
     new_track_features = []
     no_reccobeats_ids = []
     for spotify_ids in chunked(my_track_ids, 40):
-        print(f'going through spotify ids: {spotify_ids}')
+        log.info(f'going through spotify ids: {spotify_ids}')
 
         reccobeats_ids = get_reccobeats_id(spotify_ids)
         if not reccobeats_ids:
-            log_to_sql('save_track_features', 'failed', 'no reccobeats ids')
+            log.warning('save_track_features','no reccobeats ids in batch, skipping')
             no_reccobeats_ids.append(reccobeats_ids)
             continue
 
-        print(f'\ngoing through reccobeats ids: {reccobeats_ids}\n')
+        log.info(f'\ngoing through reccobeats ids: {reccobeats_ids}\n')
         features = get_track_features(reccobeats_ids)
-        print('got features successfully')
+        log.info('got features successfully')
         new_track_features.extend(features)
-        #time.sleep(0.10)
+        time.sleep(0.10)
         break
 
     if new_track_features:
-        print(f'going to try to insert new values...\n{new_track_features}')
+        log.info(f'going to try to insert new values...\n{new_track_features}')
         with engine.begin() as conn:
             conn.execute(insert(track_features), new_track_features)
-        print('nice.')
         log_to_sql("save_track_features", "success", f"Inserted {len(new_track_features)} features")
+        log.info(f"Nice. Inserted {len(new_track_features)} features in to sql")
         return
     else:
-        print('no new track feature info')
+        log.warning('no new track feature info, returning remaining spotify ids with no corresponding reccobeats id')
         return no_reccobeats_ids
 
 def save_track_features_wrapper():
     id_track_artist = get_missing_tracks()
     if not id_track_artist:
-        log_to_sql("save_track_features", "info", "No new tracks found")
+        log.warning("No missing tracks found")
         return
     save_track_features(id_track_artist)
 
@@ -161,10 +118,10 @@ def save_track_features_wrapper():
 
 def get_preview_url():
     """requests a track preview url from deezer using the track name and artist"""
+    log.info('going to start download process for remaining missing tracks')
     tracks_artists = get_missing_tracks()
 
     for chunk in chunked_d(tracks_artists, 10):
-        print(len(chunk))
         preview_urls = {}
         for id, (track, artist) in chunk.items():
             url = f'https://api.deezer.com/search?q=artist:"{artist}" track:"{track}"'
@@ -173,11 +130,10 @@ def get_preview_url():
                 if response.get('data') and response['data'][0].get('preview'):
                     preview_url = response['data'][0]['preview']
                     preview_urls.update({id: [track, preview_url]})
-                    print(f'got preview url for {track}: {preview_url}')
+                    log.info(f'got preview url for {track}: {preview_url}')
 
                 else:
-                    print(f'no data for {track}:{artist}')
-                    log_to_sql('get_preview_url', 'failed', 'no corresponding preview urls')
+                    log.warning(f'no data for {track}:{artist}')
         yield preview_urls
 
 
@@ -187,23 +143,22 @@ def download_preview(track_id, track, url):
     filename = os.path.join('previews', f'{safe_name}_{track_id}.mp3')
 
     if os.path.exists(filename):
-        print(f"Already exists: {filename}")
+        log.warning(f"Already exists: {filename}. skipping download")
         return
     try:
         session = get_session()
         response = session.get(url, timeout=20)
 
         if not response:
-            print(f'failed to download {url}')
-            log_to_sql('download_preview', 'fail', f'{track_id}|{url}')
+            log.error(f'failed to download {url}')
 
         if response.status_code == 200:
             with open(filename, 'wb') as f:
                 f.write(response.content)
-            print(f'downloaded successfully{url}\n file path = {filename}')
+            log.info(f'downloaded successfully{url}\n file path = {filename}')
 
     except Exception as e:
-        print(f'error! {e}')
+        log.error(f'error! {e}')
 
 
 def download_previews_simultaneously(preview_items, max_workers=10):
@@ -235,15 +190,13 @@ def get_wavs_from_all_mp3():
     file_paths = [os.path.join(preview_folder, f) for f in os.listdir(preview_folder)]
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         wav_files = list(executor.map(convert_to_wav, file_paths))
-        log_to_sql("convert_to_wav", "success", "Converted 10 files")
         return wav_files
 
 def convert_all_mp3_to_wav():
     try:
         wavs = get_wavs_from_all_mp3()
-        log_to_sql("convert_to_wav", "success", f"{len(wavs)} wavs created")
     except Exception as e:
-        log_to_sql("convert_to_wav", "fail", str(e))
+        log.fatal(f"convert_to_wav failed {e}")
 
 #--------------------------------STAGE 5 upload wav and get audio features from reccobeats---------------------------------------
 
@@ -259,13 +212,13 @@ def upload_wav_get_features(wav_file):
                 name_part = os.path.splitext(wav_file)[0]
                 track_id = name_part.split('_')[-1]
                 data['track_id'] = track_id
-                print("Uploaded successfully")
+                log.info("Uploaded successfully to reccobeats analysis audio features")
                 return data
             else:
-                print(f"Error {response.status_code}: {response.text}")
+                log.error(f"Error {response.status_code}: {response.text}")
                 return None
         except Exception as e:
-            print("Request failed:", e)
+            log.fatal("Request to reccobeats analysis audio features failed:", e)
     return None
 
 
@@ -284,54 +237,53 @@ def feature_simultaneously(files, max_workers=10):
 
 def insert_features_from_wav_file(wav_files):
     """continues calling feature_simultaneously for all wav files passed as an argument"""
-    left_to_go = len(wav_files)
     try:
         for wav_files_ten in chunked(wav_files, 10):
-            tracks = len(wav_files)
-            print(f'\nThere are {tracks} left. {datetime.now()}')
+            total = len(wav_files)
+            log.info(f'\nThere are {total} wav files. {datetime.now()}')
             features = []
             for attempt in range(5):
                 try:
-                    print(f'\ngoing to attempt uploading tracks {wav_files_ten}\n')
+                    log.info(f'\ngoing to attempt uploading 10 tracks {wav_files_ten}\n')
                     ten_feature = feature_simultaneously(wav_files_ten)
                     features.extend(ten_feature)
                     time.sleep(5)
                     break
                 except (TimeoutError, ConnectionError) as e:
-                    print(f'{e}\n going to retry in 10 seconds')
+                    log.warning(f'timeout. {e}\n going to retry in 10 seconds')
                     time.sleep(10)
                     if attempt == 4:
                         print('max retried reached, skipping')
                         break
 
             if features:
-                print(f'\ngoing to try to insert 10 new values...\n{features}\n')
+                log.info(f'\ngoing to try to insert 10 new values into sql...\n{features}\n')
                 try:
                     with engine.begin() as conn:
                         conn.execute(insert(track_features), features)
-                    print('nice.')
+                    log.info('nice.')
                     for wav_file in wav_files_ten:
                         os.remove(wav_file)
-                        print(f"{wav_file} has been removed successfully")
-                        print(f'{left_to_go} number of files left to go through')
-                        left_to_go -= 10
+                        log.info(f"{wav_file} has been removed successfully")
+                        log.info(f'{total - 10} number of files left to go through')
+                        total -= 10
                 except Exception as e:
-                    print(f'couldnt insert into table {e}')
+                    log.error(f'couldnt insert into table {e}')
     except KeyboardInterrupt:
-        print('Stopped!')
+        log.info('Stopped!')
 
 def insert_features_from_all_wavs():
     file_paths = os.listdir("previews")
     wav_files = [os.path.join("previews", f) for f in file_paths if f.lower().endswith(".wav")]
     if not wav_files:
-        log_to_sql("insert_features", "info", "No wav files found")
+        log.warning("insert_features, No wav files found")
         return
     insert_features_from_wav_file(wav_files)
 
 
 #----------------------------------------------------PIPELINE-----------------------------------------------------------------
 
-def run_pipeline():
+def run_audio_features_pipeline():
     stages = [
         ("get_missing_tracks", get_missing_tracks),
         ("save_track_features", save_track_features_wrapper),
@@ -345,20 +297,25 @@ def run_pipeline():
 
     for name, func in stages:
         if name in completed_stages:
-            print(f'skipping {name}, already success')
+            log.info(f'skipping {name}, already success')
             continue
 
+        log.info(f'audio features pipeline running. starting stage {name}')
         log_to_sql(name, "running", f"Starting stage {name}")
         try:
             func()
+            log.info(f'Success! stage {name} completed')
             log_to_sql(name, "success", f"Stage {name} completed")
         except Exception as e:
+            log.fatal(f'Whoops! stage {name} failed!')
             log_to_sql(name, "fail", f"Stage {name} failed: {e}")
             break
 
 if __name__ == "__main__":
+    log.info('run audio features pipeline started!')
     log_to_sql("pipeline", "start", "Audio feature pipeline initiated")
-    run_pipeline()
+    run_audio_features_pipeline()
+    log.info('run audio features pipeline completed!')
     log_to_sql("pipeline", "end", "Pipeline completed")
 
 
