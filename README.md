@@ -4,7 +4,7 @@ Using the spotipy and reccobeats API, I create a pipeline to collect data and to
 
 Features
 - Streaming daemon: continuously tracks currently playing songs and inserts listening events
-- Playlist Albums population pipeline: fetches playlist contents and merges into SQL (merge_playlist_contents stored procedure) and inserts album contents
+- Playlist Albums population pipeline: fetches playlist contents and merges into SQL (merge_playlist_contents stored procedure) to update slowly changing dimension tables playlist(type 2) and playlist_tracks (type 1). After merging playlists, this pipeline inserts album contents.
 - Audio-features pipeline: uses reccobeats and Deezer previews when needed to populate track_features
 - Automatic artist/album metadata enrichment (using Spotify API)
 
@@ -18,15 +18,15 @@ Table of contents
 - Troubleshooting
 - Contributing
 
-Data workflow for the streaming daemon which tracks listening habits, and the update playlists daemon which inserts playlist contents and updates the slowly changing dimension playlists table.
+Data workflow for the streaming daemon, and the update playlists daemon:
 <img width="1548" height="980" alt="myspotifytracker2-Page-1 drawio (1)" src="https://github.com/user-attachments/assets/b8e9d6ed-b90d-4ab2-af17-9c29e4566fd1" />
 
-Data pipeline for getting audio features. As this endpoint has been depracated from the spotify api, ive used reccobeats and deezer.
+Data pipeline for getting audio features. As this endpoint has been depracated from the spotify api, I've used reccobeats and deezer:
 <img width="866" height="820" alt="Untitled Diagram drawio" src="https://github.com/user-attachments/assets/68562c67-258d-4df5-bd6a-12103c05c263" />
 
-Structure of the MySpotify relational database 
+Structure of the MySpotify relational database:
 <img width="975" height="824" alt="sqlschema" src="https://github.com/user-attachments/assets/4b7d17eb-49f1-420c-8eed-dc975ca12113" />
 
-next steps
-Using airflow and AWS cloud services, streaming can run 24/7 optimally, and regular table updates can be scheduled.
-creating a dashboard with tableau or power bi to visualise listening habits over time, most listened to genres, artists etc.
+Next steps:
+- Using airflow and AWS cloud services, streaming can run 24/7 optimally, and regular table updates can be scheduled.
+- Creating a dashboard with tableau or power bi to visualise listening habits over time, most listened to genres, artists etc.
