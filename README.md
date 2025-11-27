@@ -1,4 +1,6 @@
 # My-Spotify-Listening-Habits
+In this project I have created a spotify listening habits tracker in order to automate playlist creation, playlist personalisation and produce the popular spotify 'wrapped' feature regularly. 
+This repo showcases my pipeline development and management skills
 Using the spotipy and reccobeats API, I create a pipeline to collect data and to regularly update sql tables. Then I conduct analysis on my listening habits and playlist vibes and automate updates and changes to my playlists. 
 
 This is the data workflow for the streaming daemon which tracks listening habits, and the update playlists daemon which inserts playlist contents and updates the slowly changing dimension playlists table.
