@@ -1,6 +1,5 @@
 import json
 from datetime import datetime
-from PIL.ImageChops import offset
 from utils import safe_spotipy_call, chunked, log_to_sql, insert_into_sql, safe_request, get_existing_ids
 from db import engine, track_reference, listening_two, albums, artists, playlist_tracks, playlists
 from sqlalchemy import select, insert, func, update, distinct, and_, text

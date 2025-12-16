@@ -157,6 +157,58 @@ def deal_with_artists_albums_reference(track_info):
             return False
 
 
+def check_track_up_to_date():
+    with engine.connect() as conn:
+        sql_last_50 = conn.execute(
+            select(
+                listening_two.c.start_time
+            ).where(
+                listening_two.c.track_id.isnot(None)
+            ).order_by(
+                listening_two.c.start_time.desc()
+            ).limit(1)
+        ).scalar()
+    last_checkpoint = int(sql_last_50.timestamp() * 1000)
+
+    #while True:
+    recent = safe_spotipy_call(sp.current_user_recently_played, limit=50)
+    items = recent.get("items", [])
+    new_tracks = []
+    for item in items:
+        date_played = datetime.fromisoformat(item['played_at'])
+        naieve_date_played = date_played.replace(tzinfo=None)
+        if naieve_date_played <= sql_last_50:
+            log.info('up to date')
+            break
+        track_id = item['track']['id']
+        downloaded = item['track']['is_local']
+        popularity = item['track']['popularity']
+        duration_ms = item['track']['duration_ms']
+        context = item.get("context") or {}
+        uri = context.get("uri", "")
+        playlist_id_current = uri.split(":")[-1] if context.get("type") == "playlist" else None
+        album_id_current = uri.split(":")[-1] if context.get("type") == "album" else None
+        artist_id_current = uri.split(":")[-1] if context.get("type") == "artist" else None
+
+        new_tracks.append({
+            'track_id': track_id,
+            'popularity': popularity,
+            'date_played': date_played,
+            'duration_ms': duration_ms,
+            'context_id': playlist_id_current or album_id_current or artist_id_current,
+            'context_type': context['type'],
+            'downloaded': downloaded
+        })
+
+    if new_tracks:
+        try:
+            insert_into_sql(listening_history, new_tracks)
+            log.info(f'inserted {len(new_tracks)} back up tracks to listening_history')
+        except Exception as e:
+            log.error(f"Error {e}")
+
+check_track_up_to_date()
+
 
 def save_last_50_tracks(after_ts):
     """loops from a specified datetime in milliseconds until there are no more tracks in current user recently played"""
@@ -218,7 +270,8 @@ def safe_streaming_sp_call(method, *args, max_retries=3, delay=3, **kwargs):
         except spotipy.SpotifyException as e:
             log.warning(f"Attempt {attempt + 1}: Spotify error: {e}")
             if e.http_status == 429:
-                wait = int(e.headers.get("Retry-After", 5))
+                wait = int(e.headers.get("Retry-After", 8))
+                wait += 60000
                 log.warning(f'Spotify rate limit! wait time:{wait}')
                 last_checkpoint = int(datetime.now().timestamp() * 1000)
                 time.sleep(wait)
