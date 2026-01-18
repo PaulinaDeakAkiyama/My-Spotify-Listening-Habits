@@ -4,8 +4,7 @@ import time
 from oauth import create_spotify_client
 from utils import log_to_sql, insert_into_sql
 from db import artists, albums, track_reference, listening_two
-from tracker import get_current_track, deal_with_artists_albums_reference, \
-    check_track_up_to_date
+from tracker import get_current_track, deal_with_artists_albums_reference, save_last_50_tracks
 #from SCDplaylistsupdate import update_tracks_and_playlists
 from logger import log
 
@@ -15,7 +14,6 @@ def tracker():
     try:
         previous_id = None
         start_time = datetime.now()
-        #update_playlists
         while True:
             current_track = get_current_track()
 
@@ -59,7 +57,7 @@ def main():
     log.info(f'Spotify song tracker started! {start_time}')
     log_to_sql('tracker', 'started', 'ongoing')
     try:
-        check_track_up_to_date()
+        save_last_50_tracks()
         D = Thread(target=tracker, daemon=True)
         D.start()
         while True:
