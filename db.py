@@ -9,7 +9,7 @@ HOST = Config.SQL_HOST
 DATABASE = "MySpotify"
 
 
-engine = create_engine(f"mysql+mysqlconnector://{USER}:{PASSWORD}@{HOST}/{DATABASE}")
+engine = create_engine(f"mysql+pymysql://{USER}:{PASSWORD}@{HOST}/{DATABASE}")
 metadata = MetaData()
 
 playlists = Table('playlists', metadata, autoload_with=engine)
@@ -21,4 +21,3 @@ track_reference = Table('track_reference', metadata, autoload_with=engine)
 albums = Table('albums', metadata, autoload_with=engine)
 artists = Table('artists', metadata, autoload_with=engine)
 listening_history = Table('listening_history', metadata, autoload_with=engine)
-# fact = Table('fact', metadata, autoload_with=engine)

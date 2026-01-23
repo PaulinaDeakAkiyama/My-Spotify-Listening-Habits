@@ -1,8 +1,7 @@
 import json
 from datetime import datetime
-from PIL.ImageChops import offset
 from utils import safe_spotipy_call, chunked, log_to_sql, insert_into_sql, safe_request, get_existing_ids
-from db import engine, track_reference, listening_two, albums, artists, playlist_tracks, playlists
+from db import engine, track_reference, listening_two, albums, artists, playlist_tracks, playlists, listening_history
 from sqlalchemy import select, insert, func, update, distinct, and_, text
 from oauth import create_spotify_client
 import time
@@ -104,7 +103,7 @@ def get_all_playlists():
             .where(
                 and_(
                     playlists.c.valid_to == '3000-01-01 01:00:00',
-                    playlists.c.saved == '1'
+                    playlists.c.saved == 1
                 )
             )
         ).union(
@@ -115,6 +114,11 @@ def get_all_playlists():
                     listening_two.c.context_id.isnot(None),
                     listening_two.c.playlist_fk == 1
                 )
+            )
+        ).union(
+            select(listening_history.c.context_id)
+            .where(
+                listening_history.c.context_type == 'playlist'
             )
         )
 

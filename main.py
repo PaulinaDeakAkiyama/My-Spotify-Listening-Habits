@@ -4,7 +4,7 @@ import time
 from oauth import create_spotify_client
 from utils import log_to_sql, insert_into_sql
 from db import artists, albums, track_reference, listening_two
-from tracker import get_current_track, update_albums, update_artists, deal_with_artists_albums_reference
+from tracker import get_current_track, deal_with_artists_albums_reference, save_last_50_tracks
 #from SCDplaylistsupdate import update_tracks_and_playlists
 from logger import log
 
@@ -14,7 +14,6 @@ def tracker():
     try:
         previous_id = None
         start_time = datetime.now()
-        #update_playlists
         while True:
             current_track = get_current_track()
 
@@ -56,8 +55,9 @@ def tracker():
 def main():
     start_time = datetime.now()
     log.info(f'Spotify song tracker started! {start_time}')
+    log_to_sql('tracker', 'started', 'ongoing')
     try:
-        #update_trakcs_and_playlists
+        save_last_50_tracks()
         D = Thread(target=tracker, daemon=True)
         D.start()
         while True:
@@ -69,8 +69,10 @@ def main():
                 #update_tracks_and_playlists()
     except KeyboardInterrupt:
         log.info('Spotify tracker manually stopped')
+        log_to_sql('Spotify tracker', 'stopped', 'nothing running')
     except Exception as e:
         log.fatal(f'whoops {e}')
+
 
 
 if __name__ == '__main__':

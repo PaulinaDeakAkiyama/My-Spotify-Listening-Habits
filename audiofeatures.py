@@ -1,6 +1,6 @@
 import time, os, subprocess, re, requests, concurrent.futures
-from db import engine, playlist_tracks, track_features, track_reference
-from sqlalchemy import insert, select, func, text
+from db import engine, playlist_tracks, track_features, track_reference, artists
+from sqlalchemy import insert, select, func, text, exists
 from oauth import create_spotify_client
 from datetime import datetime, time as dtime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,15 +16,28 @@ os.makedirs("previews", exist_ok=True)
 def get_missing_tracks():
     """Return track_id:[track_name, track_artist] for all tracks with no features"""
     with engine.connect() as conn:
-        result = conn.execute(
-            select(track_reference.c.track_id, track_reference.c.track_name, track_reference.c.artist_name)
-            .where(
-                track_reference.c.track_id.not_in(
-                    select(func.coalesce(track_features.c.track_id, 0))
+        stmt = (
+            select(
+                track_reference.c.track_id,
+                track_reference.c.track_name,
+                artists.c.artist_name
+            )
+            .select_from(
+                track_reference.outerjoin(
+                    artists,
+                    artists.c.artist_id == track_reference.c.artist_id
                 )
             )
-        ).all()
-        id_track_artist = {a: [b, c] for a, b, c in result}
+            .where(
+                ~exists(
+                    select(1).where(
+                        track_features.c.track_id == track_reference.c.track_id
+                    )
+                )
+            )
+        )
+        result = conn.execute(stmt).all()
+        id_track_artist = {a: (b, c) for a, b, c in result}
     log.info(f'Found {len(id_track_artist)}')
     return id_track_artist
 
@@ -310,6 +323,9 @@ def run_audio_features_pipeline():
             log.fatal(f'Whoops! stage {name} failed!')
             log_to_sql(name, "fail", f"Stage {name} failed: {e}")
             break
+        except KeyboardInterrupt:
+            log.info(f'stopped as stage: {name}')
+            log_to_sql(name, 'stopped', 'manually stopped')
 
 if __name__ == "__main__":
     log.info('run audio features pipeline started!')
