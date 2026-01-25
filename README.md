@@ -37,7 +37,8 @@ Why this looks impressive
 <img width="975" height="824" alt="sqlschema" src="https://github.com/user-attachments/assets/4b7d17eb-49f1-420c-8eed-dc975ca12113" />
 
 Next steps:
-- Using airflow and AWS cloud services, streaming can run 24/7 optimally, and regular table updates can be scheduled.
+- Using airflow and a Virtual machine, streaming can run 24/7 optimally, and regular table updates can be scheduled.
+- Creating a docker file to create better reproduceability
 - Creating a dashboard with tableau or power bi to visualise listening habits over time, most listened to genres, artists etc.
 
 Quickstart (development)
