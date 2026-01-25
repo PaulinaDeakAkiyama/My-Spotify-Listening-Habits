@@ -42,7 +42,7 @@ def tracker():
             else:
                 insert_into_sql(listening_two, current_track)
                 previous_id = current_track['listening_two']['track_id']
-                time.sleep(5)
+                time.sleep(10)
 
     except Exception as e:
         log.error(f"hehe Error: {type(e).__name__} {e}")
