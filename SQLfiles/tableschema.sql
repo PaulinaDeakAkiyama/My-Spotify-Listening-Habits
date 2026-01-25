@@ -16,10 +16,10 @@ select * from playlists;
 
 UPDATE playlists p
 JOIN (SELECT playlist_id, MAX(added_at) AS ma FROM playlist_tracks GROUP BY playlist_id) m
-ON m.playlist_id = p.playlist_id
+ON m.playlist_id = p.playlist_id 
 SET p.valid_from = m.ma;
 
-
+ 
  CREATE TABLE IF NOT EXISTS playlist_tracks (
     pk INT PRIMARY KEY AUTO_INCREMENT,
     id VARCHAR(255),
@@ -54,12 +54,12 @@ CREATE TABLE IF NOT EXISTS listening_two(
    is_new_group BOOLEAN NOT NULL,
    CONSTRAINT FOREIGN KEY (playlist_fk) REFERENCES playlists(id),
    CONSTRAINT FOREIGN KEY (track_id) REFERENCES track_reference(track_id)
-);
+);  
 
 
 UPDATE listening_two l
-SET l.start_time = (SELECT DATE_SUB(time_stamp, INTERVAL progress_ms*1000 MICROSECOND) AS start_time
-                    FROM listening_two c
+SET l.start_time = (SELECT DATE_SUB(time_stamp, INTERVAL progress_ms*1000 MICROSECOND) AS start_time 
+                    FROM listening_two c 
                     WHERE c.start_time = '0000-00-00 00:00:00' AND track_id IS NOT NULL);
 
 UPDATE listening_two SET playlist_fk = (SELECT id FROM playlists WHERE playlists.playlist_id = listening_two.playlist_id ) WHERE playlist_fk IS NULL;
@@ -85,9 +85,9 @@ CREATE TABLE IF NOT EXISTS track_features(
     timestamp TIMESTAMP DEFAULT current_timestamp,
     CONSTRAINT FOREIGN KEY (track_id) REFERENCES track_reference(track_id)
     );
-
-
-
+    
+ 
+    
 CREATE TABLE IF NOT EXISTS track_reference(
     track_id VARCHAR(50) PRIMARY KEY,
     track_name VARCHAR(255) NOT NULL,
@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS albums(
     total_tracks INT,
     release_date VARCHAR(50),
     label VARCHAR(255),
-    popularity INT,
+    popularity INT, 
     artist_id VARCHAR(50),
     collab_artist VARCHAR(50),
     inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -136,15 +136,15 @@ CREATE TABLE IF NOT EXISTS listening_history(
     context_type VARCHAR(50),
     downloaded BOOLEAN
     );
-
+       
 CREATE TABLE deleted_tracks(
 		 pk INT AUTO_INCREMENT PRIMARY KEY,
 		 added_at DATETIME,
 		 added_by VARCHAR(50),
 		 num_tracks INT,
 		 playlist_id VARCHAR(50),
-		 downloaded BOOLEAN);
-
+		 downloaded BOOLEAN);      
+      
 CREATE TABLE IF NOT EXISTS logging(
 	id INTEGER PRIMARY KEY auto_increment,
 	message TEXT,
@@ -162,11 +162,23 @@ CREATE TABLE IF NOT EXISTS procedure_log (
     message TEXT,
     status ENUM('SUCCESS', 'FAILURE', 'NO_CHANGE'),
     log_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+); 
+ 
+ 
+ 
+ CREATE TABLE IF NOT EXISTS listening_backup (
+   time_stamp TIMESTAMP PRIMARY KEY,
+   start_time TIMESTAMP NOT NULL,
+   progress_ms INT NULL,
+   duration_ms INT NULL,
+   track_id VARCHAR(50) NULL,
+   context_id VARCHAR(50) NULL,
+   context_type VARCHAR(50),
+   playlist_fk INT NULL,
+   popularity INT NULL,
+   device_name VARCHAR(30) NULL,
+   volume_percentage INT NULL,
+   is_new_group BOOLEAN NOT NULL,
+
+   PRIMARY KEY (time_stamp)
 );
-
-SELECT * FROM procedure_log;
- # fact table start end time calcutaled more accuratly
- select * from logging;
-
-
-    
