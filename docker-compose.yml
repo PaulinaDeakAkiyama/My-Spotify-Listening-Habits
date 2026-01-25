@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  db:
+    image: mysql:8.0
+    container_name: spotify_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: spotify
+      MYSQL_USER: spotifyuser
+      MYSQL_PASSWORD: spotifypass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./SQLfiles:/docker-entrypoint-initdb.d  # Auto-runs SQL files on first start
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Your Spotify Tracker App
+  app:
+    build: .
+    container_name: spotify_tracker
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # These read from your .env file
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
+      - REDIRECT_URI=${REDIRECT_URI}
+      - STATE=${STATE}
+      - SQL_USER=spotifyuser
+      - SQL_PASSWORD=spotifypass
+      - SQL_HOST=db  # This is the database service name
+    volumes:
+      - .:/app  # Mount your code for development (optional - remove in production)
+    env_file:
+      - .env
+
+volumes:
+  mysql_data:
