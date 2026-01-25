@@ -12,7 +12,7 @@ services:
       MYSQL_USER: spotifyuser
       MYSQL_PASSWORD: spotifypass
     ports:
-      - "3306:3306"
+      - "3307:3306"  # Mapped to 3307 to avoid conflict with local MySQL
     volumes:
       - mysql_data:/var/lib/mysql
       - ./SQLfiles:/docker-entrypoint-initdb.d  # Auto-runs SQL files on first start
@@ -44,5 +44,84 @@ services:
     env_file:
       - .env
 
+  # Airflow MySQL Database
+  airflow-mysql:
+    image: mysql:8.0
+    container_name: airflow_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: airflowroot
+      MYSQL_DATABASE: airflow
+      MYSQL_USER: airflow
+      MYSQL_PASSWORD: airflowpass
+    ports:
+      - "3308:3306"  # Airflow metadata on host port 3308
+    volumes:
+      - airflow_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Airflow Scheduler
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow_scheduler
+    restart: always
+    command: scheduler
+    depends_on:
+      airflow-mysql:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqlclient://airflow:airflowpass@airflow-mysql:3306/airflow
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      # Pass through Spotify credentials for DAG tasks
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
+      - REDIRECT_URI=${REDIRECT_URI}
+      - STATE=${STATE}
+      - SQL_USER=spotifyuser
+      - SQL_PASSWORD=spotifypass
+      - SQL_HOST=db
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - .:/opt/airflow/app
+    env_file:
+      - .env
+
+  # Airflow Webserver
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow_webserver
+    restart: always
+    command: webserver
+    depends_on:
+      - airflow-mysql
+      - airflow-scheduler
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: mysql+mysqlclient://airflow:airflowpass@airflow-mysql:3306/airflow
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - .:/opt/airflow/app
+    env_file:
+      - .env
+
 volumes:
   mysql_data:
+  airflow_mysql_data:

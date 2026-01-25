@@ -1,0 +1,26 @@
+# Use official Airflow image
+FROM apache/airflow:2.9.3-python3.11
+
+# Switch to root to install system dependencies
+USER root
+
+# Install system dependencies for MySQL and ffmpeg
+RUN apt-get update && apt-get install -y \
+    default-libmysqlclient-dev \
+    build-essential \
+    pkg-config \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Switch back to airflow user
+USER airflow
+
+# Copy and install Python dependencies
+COPY requirements.txt /requirements.txt
+RUN pip install --no-cache-dir -r /requirements.txt
+
+# Copy the entire project into the container
+COPY . /opt/airflow/app
+
+# Set Python path so DAGs can import from your project
+ENV PYTHONPATH=/opt/airflow/app
