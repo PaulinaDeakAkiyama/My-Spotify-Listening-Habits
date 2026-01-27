@@ -11,13 +11,13 @@ TL;DR
 - Clone, populate a MySQL database named `MySpotify` with the schema and stored procedure used by the project, fill .env, then:
   - python main.py — run the streaming tracker daemon
   - python populatetables.py — fetch playlists and merge playlist contents
-  - python audiofeatures.py — run audio-features pipeline (requires ffmpeg)
+  - python audiofeatures.py — run audio-features pipeline (requires ffmpeg and a deezer app) 
   - python tableupdate.py — playlist / my_tracks utils
 
 Features
 - Streaming daemon: continuously tracks currently playing songs and inserts listening events
 - Playlist Albums population pipeline: fetches playlist contents and merges into SQL (merge_playlist_contents stored procedure) to update slowly changing dimension tables playlist(type 2) and playlist_tracks(type 1). After merging playlists, this pipeline inserts album contents.
-- Audio features pipeline using reccobeats (primary) with Deezer previews + ffmpeg fallback for missing features.
+- Audio features pipeline using reccobeats (primary) with Deezer previews + ffmpeg fallback for missing features. *update: deezer now provides 2FA but new apps cannot be created at the moment, so my audio features pipeline is momentarily unusable*
 - Artist and album metadata enrichment.
 - Resilient API wrappers: handles Spotify 429 rate limits and retries.
 
