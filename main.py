@@ -26,7 +26,7 @@ def tracker():
             current_track['listening_two']['start_time'] = start_time
             current_track['listening_two']['is_new_group'] = is_new_group
 
-            log.info(f'\n{datetime.now()}{start_time}: playing: {current_track['track_reference']['track_name']}\n')
+            log.info(f'\n{datetime.now()}{start_time}: playing: {current_track["track_reference"]["track_name"]}\n')
 
             if current_track['listening_two']['track_id'] is not None:
                 time.sleep(1)
@@ -71,7 +71,7 @@ def main():
         log.info('Spotify tracker manually stopped')
         log_to_sql('Spotify tracker', 'stopped', 'nothing running')
     except Exception as e:
-        log.fatal(f'whoops {e}')
+        log.exception(f'whoops {e}')
 
 
 

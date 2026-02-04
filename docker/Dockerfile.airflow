@@ -19,6 +19,9 @@ USER airflow
 COPY requirements.txt /requirements.txt
 RUN pip install --no-cache-dir -r /requirements.txt
 
+# Ensure MySQL driver is available for Airflow metadata DB
+RUN pip install --no-cache-dir mysqlclient
+
 # Copy the entire project into the container
 COPY . /opt/airflow/app
 

@@ -1,6 +1,7 @@
 spotipy
 sqlalchemy
 mysql-connector-python
+pymysql
 requests
 pillow
 python-dotenv

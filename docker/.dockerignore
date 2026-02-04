@@ -17,3 +17,4 @@ previews/
 .idea
 *.swp
 *.swo
+airflow/logs/
