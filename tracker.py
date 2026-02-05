@@ -158,72 +158,72 @@ def deal_with_artists_albums_reference(track_info):
 
 def save_last_50_tracks():
     """loops from a specified datetime in milliseconds until there are no more tracks in current user recently played"""
-    with engine.connect() as conn:
-        sql_last_50 = conn.execute(
-            select(
-                listening_two.c.start_time
-            ).where(
-                listening_two.c.track_id.isnot(None)
-            ).order_by(
-                listening_two.c.start_time.desc()
-            ).limit(1)
-        ).scalar()
-    after_ts = int(sql_last_50.timestamp() * 1000)
-    while True:
-
+    log.info('saving missing tracks')
+    try:
         with engine.connect() as conn:
-            result = conn.execute(select(func.max(listening_history.c.date_played)).order_by(listening_history.c.date_played.desc()).limit(1))
-            last_date_played = result.scalar()
+            sql_last_50 = conn.execute(
+                select(
+                    listening_two.c.start_time
+                ).where(
+                    listening_two.c.track_id.isnot(None)
+                ).order_by(
+                    listening_two.c.start_time.desc()
+                ).limit(1)
+            ).scalar()
+        after_ts = int(sql_last_50.timestamp() * 1000)
 
-        recent = safe_spotipy_call(sp.current_user_recently_played, limit=50, after=after_ts)
-        items = recent.get("items", [])
-        if not items:
-            log.info('finished getting previous tracks')
-            break
-
-        new_tracks = []
-        for item in items:
-            downloaded = item['track']['is_local']
-            track_id = item['track']['id']
-            track_name = item['track']['name']
-            popularity = item['track']['popularity']
-            date_played = datetime.fromisoformat(item['played_at'])
-            naieve_date_played = date_played.replace(tzinfo=None, microsecond=0)
-            duration_ms = item['track']['duration_ms']
-            context = item.get("context") or {}
-            uri = context.get("uri", "")
-            playlist_id_current = uri.split(":")[-1] if context.get("type") == "playlist" else None
-            album_id_current = uri.split(":")[-1] if context.get("type") == "album" else None
-            artist_id_current = uri.split(":")[-1] if context.get("type") == "artist" else None
-
-            if naieve_date_played <= last_date_played:
-                log.info('up to date')
+        while True:
+            with engine.connect() as conn:
+                result = conn.execute(select(func.max(listening_history.c.date_played)).order_by(listening_history.c.date_played.desc()).limit(1))
+                last_date_played = result.scalar()
+            recent = safe_spotipy_call(sp.current_user_recently_played, limit=50, after=after_ts)
+            items = recent.get("items", [])
+            if not items:
+                log.info('finished getting previous tracks')
                 break
-            new_tracks.append({
-                'track_id' : track_id,
-                'track_name' : track_name,
-                'popularity' : popularity,
-                'date_played' : date_played,
-                'duration_ms' : duration_ms,
-                'context_id': playlist_id_current or album_id_current or artist_id_current,
-                'context_type': context['type'],
-                'downloaded': downloaded
-            })
 
-        if new_tracks:
-            print(new_tracks, last_date_played)
-            try:
+            new_tracks = []
+            for item in items:
+                downloaded = item['track']['is_local']
+                track_id = item['track']['id']
+                track_name = item['track']['name']
+                popularity = item['track']['popularity']
+                date_played = datetime.fromisoformat(item['played_at'])
+                naieve_date_played = date_played.replace(tzinfo=None, microsecond=0)
+                duration_ms = item['track']['duration_ms']
+                context = item.get("context") or {}
+                uri = context.get("uri", "")
+                playlist_id_current = uri.split(":")[-1] if context.get("type") == "playlist" else None
+                album_id_current = uri.split(":")[-1] if context.get("type") == "album" else None
+                artist_id_current = uri.split(":")[-1] if context.get("type") == "artist" else None
+
+                if naieve_date_played <= last_date_played:
+                    log.info('up to date')
+                    break
+                new_tracks.append({
+                    'track_id' : track_id,
+                    'track_name' : track_name,
+                    'popularity' : popularity,
+                    'date_played' : date_played,
+                    'duration_ms' : duration_ms,
+                    'context_id': playlist_id_current or album_id_current or artist_id_current,
+                    'context_type': context.get("type"),
+                    'downloaded': downloaded
+                })
+
+            if new_tracks:
                 insert_into_sql(listening_history, new_tracks)
-            except Exception as e:
-                log.error(f"Error {e}")
-            log.info(f'inserted {len(new_tracks)} back up tracks to listening_history')
-        else:
-            break
+                log.info(f'inserted {len(new_tracks)} back up tracks to listening_history')
+            else:
+                break      
 
-        played_at_iso = items[-1]['played_at']
-        played_at_ts = int(datetime.fromisoformat(played_at_iso.replace('Z', '+00:00')).timestamp() * 1000)
-        after_ts = int(played_at_ts) + 1
-        time.sleep(2)
+            played_at_iso = items[-1]['played_at']
+            played_at_ts = int(datetime.fromisoformat(played_at_iso.replace('Z', '+00:00')).timestamp() * 1000)
+            after_ts = int(played_at_ts) + 1
+            time.sleep(2)
+
+    except Exception as e:
+        log.error(f"save last 50 tracks error: {type(e).__name__} {e}")      
 
 def safe_streaming_sp_call(method, *args, max_retries=3, delay=3, **kwargs):
     for attempt in range(max_retries):

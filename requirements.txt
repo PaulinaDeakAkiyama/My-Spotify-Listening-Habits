@@ -1,7 +1,7 @@
-- spotipy
-- sqlalchemy
-- mysql-connector-python (or mysqlclient depending on preference)
-- requests
-- pillow
-- python-dotenv 
-- stdlib
+spotipy
+sqlalchemy
+mysql-connector-python
+pymysql
+requests
+pillow
+python-dotenv

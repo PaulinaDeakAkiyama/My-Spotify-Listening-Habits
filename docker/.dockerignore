@@ -1,0 +1,20 @@
+# Don't copy these into Docker image
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+.git
+.gitignore
+.env
+*.log
+previews/
+.vscode
+.idea
+*.swp
+*.swo
+airflow/logs/

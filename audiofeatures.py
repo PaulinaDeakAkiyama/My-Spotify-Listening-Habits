@@ -306,7 +306,9 @@ def run_audio_features_pipeline():
     ]
 
     with engine.connect() as conn:
-        completed_stages = {r[0] for r in conn.execute(text("SELECT stage FROM logging WHERE status='success'"))}
+        completed_stages = {r[0] for r in conn.execute(
+            text("SELECT stage FROM logging WHERE status='success' AND timestamp > :yesterday"
+            ), {'yesterday': datetime.now() - timedelta(hours=24)})}
 
     for name, func in stages:
         if name in completed_stages:
