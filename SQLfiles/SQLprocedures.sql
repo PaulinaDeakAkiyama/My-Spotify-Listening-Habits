@@ -62,29 +62,6 @@ END$$
 DELIMITER ;
 
 
-
-DROP PROCEDURE IF EXISTS fill_pause_time;
-DELIMITER $$
-
-CREATE PROCEDURE fill_pause_time()
-BEGIN
-    UPDATE listening_two 
-    SET progress_ms = (
-        SELECT TIMESTAMPDIFF(SECOND, time_stamp, progress_ms)/1000 
-        FROM listening_two
-        )
-    WHERE progress_ms IS NULL 
-    AND track_id IS NULL;
-
-END$$
-DELIMITER ;
-
-
-#view
-#add logging, change to only past hour worth of rows? only end time? procedure for getting all tracks since last seen date in listneing two and adjusting paused time
-
-
-
 DROP PROCEDURE IF EXISTS merge_playlist_contents;
 DELIMITER $$
 
